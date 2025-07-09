@@ -2,7 +2,6 @@ import os
 import re
 import streamlit as st
 import pandas as pd
-import fpdf
 from docx import Document
 from docx.shared import Pt
 import tempfile
