@@ -1,7 +1,7 @@
 streamlit
 pandas
 python-docx
-PyPDF2
+pypdf
 pdf2docx
 openpyxl
-
+reportlab
