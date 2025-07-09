@@ -10,7 +10,10 @@ from datetime import datetime
 import base64
 from io import BytesIO
 import zipfile
-from fpdf import FPDF
+from pypdf import PdfWriter, PdfReader
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+import io
 from pdf2docx import Converter
 
 
