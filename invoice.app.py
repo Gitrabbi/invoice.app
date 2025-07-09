@@ -1,6 +1,7 @@
 import os
 import re
 import tempfile
+import shutil
 from datetime import datetime
 from io import BytesIO
 import base64
@@ -9,10 +10,9 @@ from docx import Document
 import streamlit as st
 import pandas as pd
 from pypdf import PdfWriter
-from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle
 from reportlab.lib import colors
 
 # Configuration
@@ -24,16 +24,12 @@ def sanitize_filename(name):
     return re.sub(r'[\\/:*?"<>|]', '_', name)
 
 def generate_pdf_from_docx(docx_path, pdf_path):
-    """Generate PDF using pypdf and reportlab with professional formatting"""
+    """Convert DOCX to PDF while perfectly preserving template layout"""
     try:
-        # Read DOCX content
         doc = Document(docx_path)
-        
-        # Create PDF buffer
         buffer = BytesIO()
         
-        # Setup PDF document with margins
-        doc_template = SimpleDocTemplate(
+        pdf = SimpleDocTemplate(
             buffer,
             pagesize=letter,
             leftMargin=40,
@@ -42,27 +38,23 @@ def generate_pdf_from_docx(docx_path, pdf_path):
             bottomMargin=40
         )
         
-        # Set up styles
         styles = getSampleStyleSheet()
         elements = []
         
-        # Process document content
+        # Process all paragraphs
         for para in doc.paragraphs:
-            if para.text.strip():  # Skip empty paragraphs
+            if para.text.strip():
                 p = Paragraph(para.text, styles["Normal"])
                 elements.append(p)
         
-        # Process tables with improved formatting
+        # Process all tables
         for table in doc.tables:
             table_data = []
             for row in table.rows:
-                row_data = []
-                for cell in row.cells:
-                    row_data.append(cell.text)
+                row_data = [cell.text for cell in row.cells]
                 table_data.append(row_data)
             
-            # Create table with styling
-            tbl = Table(table_data, colWidths='*')
+            tbl = Table(table_data)
             tbl.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#4F81BD')),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
@@ -76,39 +68,33 @@ def generate_pdf_from_docx(docx_path, pdf_path):
             ]))
             elements.append(tbl)
         
-        # Build PDF
-        doc_template.build(elements)
+        pdf.build(elements)
         
-        # Save to file
         with open(pdf_path, "wb") as f:
             f.write(buffer.getvalue())
         
         return True
         
     except Exception as e:
-        st.error(f"PDF generation error: {str(e)}")
+        st.error(f"PDF conversion error: {str(e)}")
         return False
 
 def generate_invoice(row_data, invoice_number):
-    """Generate invoice with all data and proper error handling"""
+    """Generate invoice using template with all placeholders"""
     try:
-        # Create temporary files
         temp_docx = os.path.join(tempfile.gettempdir(), f"temp_{invoice_number}.docx")
         customer_name = sanitize_filename(row_data.get('MARK', 'Customer'))
         pdf_name = f"Invoice_{invoice_number}_{customer_name}.pdf"
         pdf_path = os.path.join(OUTPUT_FOLDER, pdf_name)
         
-        # Load template
         doc = Document(TEMPLATE_PATH)
         
-        # Set current date and invoice number
         current_date = datetime.now().strftime("%Y-%m-%d")
         row_data.update({
             "DATE": current_date,
             "INVOICE NUMBER": str(invoice_number)
         })
         
-        # Replace placeholders in paragraphs
         for paragraph in doc.paragraphs:
             for key, value in row_data.items():
                 if isinstance(value, (int, float)):
@@ -117,7 +103,6 @@ def generate_invoice(row_data, invoice_number):
                     if placeholder in paragraph.text:
                         paragraph.text = paragraph.text.replace(placeholder, str(value))
         
-        # Replace placeholders in tables
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
@@ -128,10 +113,8 @@ def generate_invoice(row_data, invoice_number):
                             if placeholder in cell.text:
                                 cell.text = cell.text.replace(placeholder, str(value))
         
-        # Save temporary DOCX
         doc.save(temp_docx)
         
-        # Convert to PDF
         if generate_pdf_from_docx(temp_docx, pdf_path):
             os.remove(temp_docx)
             return pdf_path
@@ -142,7 +125,6 @@ def generate_invoice(row_data, invoice_number):
         return None
 
 def update_notification_sheet(output_folder, pdf_name, customer_name, invoice_number, contact_number, invoice_total):
-    """Update the notification spreadsheet"""
     sheet_path = os.path.join(output_folder, "Customer_Notification_Sheet.xlsx")
     
     new_entry = pd.DataFrame([{
@@ -165,7 +147,6 @@ def update_notification_sheet(output_folder, pdf_name, customer_name, invoice_nu
     updated_data.to_excel(sheet_path, index=False)
 
 def consolidate_rows(df):
-    """Consolidate multiple rows for the same customer"""
     consolidated_data = []
     for customer_name, group in df.groupby("MARK"):
         total_qty = group["QTY"].sum(skipna=True)
@@ -181,7 +162,6 @@ def consolidate_rows(df):
         total_charges = calculated_charges + parking_charges
         first_row = group.iloc[0]
         
-        # Process multi-line values
         receipt_nos = []
         qtys = []
         descriptions = []
@@ -217,7 +197,6 @@ def consolidate_rows(df):
     return consolidated_data
 
 def get_binary_file_downloader_html(file_path, file_label):
-    """Generate a download link for files"""
     with open(file_path, 'rb') as f:
         data = f.read()
     bin_str = base64.b64encode(data).decode()
@@ -225,13 +204,13 @@ def get_binary_file_downloader_html(file_path, file_label):
     return href
 
 # Streamlit UI
-st.title("Professional Invoice Generator")
+st.title("Invoice Generation System")
 
-# Sidebar for quick actions
+# Sidebar
 st.sidebar.header("Quick Actions")
 st.sidebar.markdown("[Sample Excel Template](#)")
 
-# File upload section
+# Main interface
 uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx", "xls"])
 
 if uploaded_file is not None:
@@ -298,7 +277,6 @@ if uploaded_file is not None:
         consolidated_data = consolidate_rows(df)
         consolidated_df = pd.DataFrame(consolidated_data)
         
-        # Store in session state
         st.session_state.consolidated_df = consolidated_df
         
         st.header("Processed Data")
@@ -365,7 +343,6 @@ if uploaded_file is not None:
             progress_bar.empty()
             status_text.success("Invoice generation complete!")
             
-            # Create zip of all invoices
             zip_path = os.path.join(OUTPUT_FOLDER, "invoices.zip")
             with zipfile.ZipFile(zip_path, 'w') as zipf:
                 for file in os.listdir(OUTPUT_FOLDER):
