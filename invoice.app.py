@@ -12,8 +12,7 @@ from io import BytesIO
 import zipfile
 from fpdf import FPDF
 from pdf2docx import Converter
-import pythoncom
-import win32com.client
+
 
 # Cloud-friendly path configuration
 TEMPLATE_PATH = "invoice_template.docx"
@@ -24,32 +23,19 @@ def sanitize_filename(name):
     return re.sub(r'[\\/:*?"<>|]', '_', name)
 
 def convert_docx_to_pdf(docx_path, pdf_path):
-    """More reliable DOCX to PDF conversion with multiple fallbacks"""
+    """Cloud-friendly DOCX to PDF conversion without Windows dependencies"""
     try:
-        # Method 1: Try Word COM object (best formatting)
+        # Method 1: Try pdf2docx (works anywhere)
         try:
-            pythoncom.CoInitialize()
-            word = win32com.client.Dispatch("Word.Application")
-            word.Visible = False
-            doc = word.Documents.Open(os.path.abspath(docx_path))
-            doc.SaveAs(os.path.abspath(pdf_path), FileFormat=17)
-            doc.Close()
-            word.Quit()
-            pythoncom.CoUninitialize()
+            cv = Converter(docx_path)
+            cv.convert(pdf_path)
+            cv.close()
             return True
-        except Exception as com_error:
-            st.warning(f"Word COM conversion failed, trying alternatives: {str(com_error)}")
+        except Exception as e:
+            st.warning(f"pdf2docx conversion warning: {str(e)}")
             
-            # Method 2: Try pdf2docx
+            # Method 2: Fallback to FPDF (basic text-only)
             try:
-                cv = Converter(docx_path)
-                cv.convert(pdf_path)
-                cv.close()
-                return True
-            except Exception as pdf_error:
-                st.warning(f"pdf2docx failed, trying FPDF: {str(pdf_error)}")
-                
-                # Method 3: Fallback to FPDF (basic)
                 doc = Document(docx_path)
                 pdf = FPDF()
                 pdf.add_page()
@@ -60,10 +46,13 @@ def convert_docx_to_pdf(docx_path, pdf_path):
                 
                 pdf.output(pdf_path)
                 return True
+            except Exception as e:
+                st.error(f"FPDF fallback failed: {str(e)}")
+                return False
+                
     except Exception as e:
-        st.error(f"All PDF conversion methods failed: {str(e)}")
+        st.error(f"All conversion methods failed: {str(e)}")
         return False
-
 def generate_pdf_from_template(template_path, row_data, output_folder, invoice_number):
     try:
         # Load template
