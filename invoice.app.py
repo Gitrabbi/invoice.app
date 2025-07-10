@@ -22,24 +22,29 @@ def sanitize_filename(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|]', '_', name)
 
 def convert_docx_to_pdf(docx_path: str, pdf_path: str) -> bool:
-    """Convert DOCX to PDF using LibreOffice's unoconv"""
+    """Convert DOCX to PDF using LibreOffice"""
     try:
+        # First try headless LibreOffice conversion
         result = subprocess.run(
-            ["unoconv", "-f", "pdf", "-o", pdf_path, docx_path],
+            ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", 
+             os.path.dirname(pdf_path), docx_path],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=30  # Prevent hanging
+            timeout=30
         )
-        return os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0
-    except subprocess.TimeoutExpired:
-        st.error("PDF conversion timed out (30s)")
+        
+        # Get the automatically generated PDF name
+        base_name = os.path.splitext(os.path.basename(docx_path))[0]
+        temp_pdf = os.path.join(os.path.dirname(pdf_path), f"{base_name}.pdf")
+        
+        if os.path.exists(temp_pdf):
+            os.rename(temp_pdf, pdf_path)
+            return True
         return False
-    except subprocess.CalledProcessError as e:
-        st.error(f"LibreOffice conversion failed: {e.stderr.decode()}")
-        return False
+        
     except Exception as e:
-        st.error(f"Unexpected conversion error: {str(e)}")
+        st.error(f"PDF conversion failed. Please ensure LibreOffice is installed. Error: {str(e)}")
         return False
 
 def validate_pdf(pdf_path: str) -> bool:
@@ -58,7 +63,6 @@ def generate_pdf_from_template(
 ) -> Optional[str]:
     """Generate PDF invoice from template"""
     try:
-        # Load and modify template
         doc = Document(template_path)
         style = doc.styles['Normal']
         style.font.size = Pt(8)
@@ -79,8 +83,6 @@ def generate_pdf_from_template(
                 for ph in [f"{{{{{key}}}}}", f"{{{{{key}.}}}}"]:
                     if ph in paragraph.text:
                         paragraph.text = paragraph.text.replace(ph, value)
-                        for run in paragraph.runs:
-                            run.font.size = Pt(8)
 
         # Replace placeholders in tables
         for table in doc.tables:
@@ -90,11 +92,8 @@ def generate_pdf_from_template(
                         for ph in [f"{{{{{key}}}}}", f"{{{{{key}.}}}}"]:
                             if ph in cell.text:
                                 cell.text = cell.text.replace(ph, value)
-                                for paragraph in cell.paragraphs:
-                                    for run in paragraph.runs:
-                                        run.font.size = Pt(8)
 
-        # Generate unique filename
+        # Generate filename
         customer = sanitize_filename(formatted_data.get("MARK", "Customer"))
         pdf_name = f"Invoice_{invoice_number}_{customer}.pdf"
         pdf_path = os.path.join(output_folder, pdf_name)
@@ -106,7 +105,7 @@ def generate_pdf_from_template(
             pdf_path = os.path.join(output_folder, pdf_name)
             counter += 1
 
-        # Convert to PDF
+        # Save and convert
         temp_docx = os.path.join(output_folder, f"temp_{invoice_number}.docx")
         doc.save(temp_docx)
         
@@ -177,9 +176,12 @@ def create_download_link(file_path: str, label: str) -> str:
         b64 = base64.b64encode(f.read()).decode()
     return f'<a href="data:application/octet-stream;base64,{b64}" download="{os.path.basename(file_path)}">{label}</a>'
 
-# Streamlit UI
 def main():
-    st.title("Invoice Generation System")
+    st.title("📄 Invoice Generation System")
+    
+    # Initialize session state
+    if 'consolidated_df' not in st.session_state:
+        st.session_state.consolidated_df = None
     
     # File Upload
     uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx", "xls"])
@@ -188,35 +190,60 @@ def main():
         try:
             df = pd.read_excel(uploaded_file)
             
-            # Initialize missing columns
+            # Initialize missing columns with defaults
             for col in ["PARKING CHARGES", "PER CHARGES", "Weight Rate"]:
                 if col not in df.columns:
-                    df[col] = 0.0 if col != "Weight Rate" else 1.0
+                    default_value = 0.0 if col != "Weight Rate" else 1.0
+                    df[col] = default_value
             
             # Global Settings UI
-            st.header("Global Settings")
-            defaults = {
-                "PER CHARGES": st.number_input("Default Rate", value=float(df["PER CHARGES"].iloc[0])),
-                "PARKING CHARGES": st.number_input("Parking Fee", value=0.0)
-            }
+            st.header("⚙️ Global Settings")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                default_per_charge = st.number_input(
+                    "Default Per Charge ($/CBM)",
+                    value=float(df["PER CHARGES"].iloc[0]),
+                    min_value=0.0,
+                    step=0.1
+                )
+            with col2:
+                default_weight_rate = st.number_input(
+                    "Default Weight Rate (kg/CBM)",
+                    value=float(df["Weight Rate"].iloc[0]),
+                    min_value=0.1,
+                    step=0.1
+                )
+            with col3:
+                default_parking = st.number_input(
+                    "Default Parking Charge ($)",
+                    value=float(df["PARKING CHARGES"].iloc[0]),
+                    min_value=0.0,
+                    step=0.1
+                )
             
-            if st.button("Apply Globally"):
-                df["PER CHARGES"] = defaults["PER CHARGES"]
-                df["PARKING CHARGES"] = defaults["PARKING CHARGES"]
-                st.success("Settings applied!")
+            if st.button("💾 Apply Global Settings", key="apply_global"):
+                df["PER CHARGES"] = default_per_charge
+                df["Weight Rate"] = default_weight_rate
+                df["PARKING CHARGES"] = default_parking
+                st.success("Global settings applied to all customers!")
             
             # Process data
             df["CBM"] = df[["MEAS.(CBM)", "WEIGHT(KG)"]].max(axis=1)
-            consolidated_df = consolidate_data(df)
+            st.session_state.consolidated_df = consolidate_data(df)
             
-            st.header("Processed Data")
-            st.dataframe(consolidated_df)
+            st.header("📊 Processed Data")
+            st.dataframe(st.session_state.consolidated_df)
             
             # Invoice Generation
-            st.header("Invoice Generation")
-            start_num = st.number_input("Starting Invoice #", min_value=1, value=1)
+            st.header("🖨️ Invoice Generation")
+            start_num = st.number_input(
+                "Starting Invoice Number", 
+                min_value=1, 
+                value=1,
+                key="invoice_start"
+            )
             
-            if st.button("Generate All Invoices"):
+            if st.button("🔄 Generate All Invoices", key="generate_all"):
                 if os.path.exists(OUTPUT_FOLDER):
                     shutil.rmtree(OUTPUT_FOLDER)
                 os.makedirs(OUTPUT_FOLDER)
@@ -224,9 +251,9 @@ def main():
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
-                for i, (_, row) in enumerate(consolidated_df.iterrows()):
-                    status_text.text(f"Processing {i+1}/{len(consolidated_df)}")
-                    progress_bar.progress((i + 1) / len(consolidated_df))
+                for i, (_, row) in enumerate(st.session_state.consolidated_df.iterrows()):
+                    status_text.text(f"Processing {i+1}/{len(st.session_state.consolidated_df)}: {row['MARK']}")
+                    progress_bar.progress((i + 1) / len(st.session_state.consolidated_df))
                     
                     pdf_path = generate_pdf_from_template(
                         TEMPLATE_PATH,
@@ -256,44 +283,50 @@ def main():
                             )
                 
                 st.markdown(
-                    create_download_link(zip_path, "Download All Invoices"),
+                    create_download_link(zip_path, "📥 Download All Invoices"),
                     unsafe_allow_html=True
                 )
-                st.success("All invoices generated!")
+                st.success("✅ All invoices generated successfully!")
             
-            # Single Invoice UI
-            st.subheader("Single Invoice")
-            customer = st.selectbox(
-                "Select Customer",
-                options=consolidated_df["MARK"].unique()
-            )
-            single_num = st.number_input(
-                "Invoice Number", 
-                min_value=1, 
-                value=start_num
-            )
-            
-            if st.button("Generate Selected Invoice"):
-                row = consolidated_df[consolidated_df["MARK"] == customer].iloc[0]
-                pdf_path = generate_pdf_from_template(
-                    TEMPLATE_PATH,
-                    row.to_dict(),
-                    OUTPUT_FOLDER,
-                    single_num
+            # Single Invoice Generation
+            st.subheader("🖨️ Single Invoice")
+            if st.session_state.consolidated_df is not None:
+                customer = st.selectbox(
+                    "Select Customer",
+                    options=st.session_state.consolidated_df["MARK"].unique(),
+                    key="customer_select"
+                )
+                single_num = st.number_input(
+                    "Invoice Number", 
+                    min_value=1, 
+                    value=start_num,
+                    key="single_invoice_num"
                 )
                 
-                if pdf_path:
-                    with open(pdf_path, "rb") as f:
-                        st.download_button(
-                            "Download Invoice",
-                            f,
-                            file_name=os.path.basename(pdf_path),
-                            mime="application/pdf"
-                        )
-                    st.success("Invoice generated!")
+                if st.button("🖨️ Generate Selected Invoice", key="generate_single"):
+                    row = st.session_state.consolidated_df[
+                        st.session_state.consolidated_df["MARK"] == customer
+                    ].iloc[0]
+                    
+                    pdf_path = generate_pdf_from_template(
+                        TEMPLATE_PATH,
+                        row.to_dict(),
+                        OUTPUT_FOLDER,
+                        single_num
+                    )
+                    
+                    if pdf_path:
+                        with open(pdf_path, "rb") as f:
+                            st.download_button(
+                                "📥 Download Invoice",
+                                f,
+                                file_name=os.path.basename(pdf_path),
+                                mime="application/pdf"
+                            )
+                        st.success(f"✅ Invoice #{single_num} generated for {customer}!")
         
         except Exception as e:
-            st.error(f"Processing error: {str(e)}")
+            st.error(f"❌ Processing error: {str(e)}")
 
 if __name__ == "__main__":
     main()
