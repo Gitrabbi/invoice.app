@@ -40,26 +40,28 @@ def convert_docx_to_pdf(docx_path, pdf_path):
         
     except Exception as e:
         st.warning(f"PDF conversion warning: {str(e)}")
-        return False
-    try:
-    # Fallback to FPDF with improved settings
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.set_font("Arial", size=8)
-    
-    # Add metadata for compatibility
-    pdf.set_title("Invoice")
-    pdf.set_author("Invoice System")
-    
-    # Process paragraphs with proper encoding
-    for para in doc.paragraphs:
-        text = para.text.encode('latin-1', 'replace').decode('latin-1')
-        pdf.multi_cell(0, 5, txt=text)
-    
-    pdf.output(pdf_path)
-    return True
-
+        try:
+            # Fallback to FPDF with improved settings
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_auto_page_break(auto=True, margin=15)
+            pdf.set_font("Arial", size=8)
+            
+            # Add metadata for compatibility
+            pdf.set_title("Invoice")
+            pdf.set_author("Invoice System")
+            
+            # Process paragraphs with proper encoding
+            doc = Document(docx_path)  # Need to read the DOCX for fallback
+            for para in doc.paragraphs:
+                text = para.text.encode('latin-1', 'replace').decode('latin-1')
+                pdf.multi_cell(0, 5, txt=text)
+            
+            pdf.output(pdf_path)
+            return True
+        except Exception as e:
+            st.error(f"FPDF fallback failed: {str(e)}")
+            return False
 def validate_pdf(pdf_path):
     """Check if PDF is readable by most viewers"""
     try:
