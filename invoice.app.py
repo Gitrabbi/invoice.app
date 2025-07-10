@@ -22,30 +22,60 @@ def sanitize_filename(name):
     return re.sub(r'[\\/:*?"<>|]', '_', name)
 
 def convert_docx_to_pdf(docx_path, pdf_path):
-    """Cloud-compatible DOCX to PDF conversion with fallbacks"""
     try:
-        # First try pdf2docx (better formatting)
+        # Add conversion parameters for better compatibility
         cv = Converter(docx_path)
-        cv.convert(pdf_path)
+        cv.convert(
+            pdf_path,
+            keep_active_elements=False,  # Disable interactive elements
+            multi_processing=False,      # Avoid multiprocessing issues
+            debug=False                   # Disable debug logs
+        )
         cv.close()
-        return True
-    except Exception as e:
-        st.warning(f"PDF conversion (pdf2docx) warning: {str(e)}")
-        try:
-            # Fallback to FPDF
-            doc = Document(docx_path)
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial", size=8)
-            
-            for para in doc.paragraphs:
-                pdf.cell(200, 5, txt=para.text, ln=True)
-                
-            pdf.output(pdf_path)
+        
+        # Verify PDF was created
+        if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
             return True
-        except Exception as e:
-            st.error(f"PDF conversion (FPDF) failed: {str(e)}")
-            return False
+        return False
+        
+    except Exception as e:
+        st.warning(f"PDF conversion warning: {str(e)}")
+        return False
+        try:
+    # Fallback to FPDF with improved settings
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_font("Arial", size=8)
+    
+    # Add metadata for compatibility
+    pdf.set_title("Invoice")
+    pdf.set_author("Invoice System")
+    
+    # Process paragraphs with proper encoding
+    for para in doc.paragraphs:
+        text = para.text.encode('latin-1', 'replace').decode('latin-1')
+        pdf.multi_cell(0, 5, txt=text)
+    
+    pdf.output(pdf_path)
+    return True
+
+def validate_pdf(pdf_path):
+    """Check if PDF is readable by most viewers"""
+    try:
+        with open(pdf_path, "rb") as f:
+            header = f.read(4)
+            return header == b"%PDF"
+    except:
+        return False
+
+# Usage in generate_pdf_from_template():
+if convert_docx_to_pdf(temp_docx, pdf_path):
+    if validate_pdf(pdf_path):
+        os.remove(temp_docx)
+        return pdf_path
+    else:
+        st.error("Generated PDF is corrupt")
 
 def generate_pdf_from_template(template_path, row_data, output_folder, invoice_number):
     try:
