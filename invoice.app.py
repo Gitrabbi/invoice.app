@@ -8,407 +8,286 @@ import tempfile
 import shutil
 from datetime import datetime
 import base64
-from io import BytesIO
 import zipfile
-from fpdf import FPDF
-from pdf2docx import Converter
+import subprocess
+from typing import Optional
 
-# Cloud-friendly path configuration
+# Configuration
 TEMPLATE_PATH = "invoice_template.docx"
 OUTPUT_FOLDER = "generated_invoices"
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-def sanitize_filename(name):
+def sanitize_filename(name: str) -> str:
+    """Make strings safe for filenames"""
     return re.sub(r'[\\/:*?"<>|]', '_', name)
 
-def convert_docx_to_pdf(docx_path, pdf_path):
+def convert_docx_to_pdf(docx_path: str, pdf_path: str) -> bool:
+    """Convert DOCX to PDF using LibreOffice's unoconv"""
     try:
-        # Add conversion parameters for better compatibility
-        cv = Converter(docx_path)
-        cv.convert(
-            pdf_path,
-            keep_active_elements=False,  # Disable interactive elements
-            multi_processing=False,      # Avoid multiprocessing issues
-            debug=False                   # Disable debug logs
+        result = subprocess.run(
+            ["unoconv", "-f", "pdf", "-o", pdf_path, docx_path],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30  # Prevent hanging
         )
-        cv.close()
-        
-        # Verify PDF was created
-        if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
-            return True
+        return os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0
+    except subprocess.TimeoutExpired:
+        st.error("PDF conversion timed out (30s)")
         return False
-        
+    except subprocess.CalledProcessError as e:
+        st.error(f"LibreOffice conversion failed: {e.stderr.decode()}")
+        return False
     except Exception as e:
-        st.warning(f"PDF conversion warning: {str(e)}")
-        try:
-            # Fallback to FPDF with improved settings
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_auto_page_break(auto=True, margin=15)
-            pdf.set_font("Arial", size=8)
-            
-            # Add metadata for compatibility
-            pdf.set_title("Invoice")
-            pdf.set_author("Invoice System")
-            
-            # Process paragraphs with proper encoding
-            doc = Document(docx_path)
-            for para in doc.paragraphs:
-                text = para.text.encode('latin-1', 'replace').decode('latin-1')
-                pdf.multi_cell(0, 5, txt=text)
-            
-            pdf.output(pdf_path)
-            return True
-        except Exception as e:
-            st.error(f"FPDF fallback failed: {str(e)}")
-            return False
+        st.error(f"Unexpected conversion error: {str(e)}")
+        return False
 
-def validate_pdf(pdf_path):
-    """Check if PDF is readable by most viewers"""
+def validate_pdf(pdf_path: str) -> bool:
+    """Verify PDF is valid"""
     try:
         with open(pdf_path, "rb") as f:
-            header = f.read(4)
-            return header == b"%PDF"
+            return f.read(4) == b"%PDF"
     except:
         return False
-def generate_pdf_from_template(template_path, row_data, output_folder, invoice_number):
+
+def generate_pdf_from_template(
+    template_path: str,
+    row_data: dict,
+    output_folder: str,
+    invoice_number: int
+) -> Optional[str]:
+    """Generate PDF invoice from template"""
     try:
+        # Load and modify template
         doc = Document(template_path)
-        
-        # Set default font size to 8pt
         style = doc.styles['Normal']
-        font = style.font
-        font.size = Pt(8)
-        
-        # Format numeric values
-        for key, value in row_data.items():
-            if isinstance(value, (int, float)):
-                row_data[key] = f"{value:.2f}" if pd.notna(value) else ""
-        
-        # Set invoice number and date
-        current_date = datetime.now().strftime("%Y-%m-%d")
-        row_data.update({
-            "DATE": current_date,
+        style.font.size = Pt(8)
+
+        # Format values
+        formatted_data = {
+            k: f"{v:.2f}" if isinstance(v, (int, float)) else str(v)
+            for k, v in row_data.items()
+        }
+        formatted_data.update({
+            "DATE": datetime.now().strftime("%Y-%m-%d"),
             "INVOICE NUMBER": str(invoice_number)
         })
-        
-        # Add invoice header
-        if len(doc.paragraphs) > 0:
-            p = doc.paragraphs[0]
-            p.text = f"Invoice #: {invoice_number}\nDate: {current_date}\n" + p.text
-            for run in p.runs:
-                run.font.size = Pt(8)
-        else:
-            p = doc.add_paragraph(f"Invoice #: {invoice_number}\nDate: {current_date}")
-            p.style.font.size = Pt(8)
-        
+
         # Replace placeholders
         for paragraph in doc.paragraphs:
-            for key, value in row_data.items():
-                for placeholder in [f"{{{{{key}}}}}", f"{{{{{key}.}}}}"]:
-                    if placeholder in paragraph.text:
-                        paragraph.text = paragraph.text.replace(placeholder, str(value))
-            for run in paragraph.runs:
-                run.font.size = Pt(8)
-        
-        # Process tables
+            for key, value in formatted_data.items():
+                for ph in [f"{{{{{key}}}}", f"{{{{{key}.}}}}"]:
+                    if ph in paragraph.text:
+                        paragraph.text = paragraph.text.replace(ph, value)
+
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
-                    for key, value in row_data.items():
-                        for placeholder in [f"{{{{{key}}}}}", f"{{{{{key}.}}}}"]:
-                            if placeholder in cell.text:
-                                cell.text = cell.text.replace(placeholder, str(value))
-                    for paragraph in cell.paragraphs:
-                        for run in paragraph.runs:
-                            run.font.size = Pt(8)
-        
-        # Generate filename
-        customer_name = row_data.get("MARK", "Customer")
-        contact_number = row_data.get("CONTACT NUMBER", "")
-        invoice_total = row_data.get("TOTAL CHARGES_SUM", "0.00")
-        
-        pdf_name = f"Invoice_{invoice_number}_{sanitize_filename(customer_name)}_{sanitize_filename(contact_number)}_{sanitize_filename(invoice_total)}.pdf"
+                    for key, value in formatted_data.items():
+                        for ph in [f"{{{{{key}}}}", f"{{{{{key}.}}}}"]:
+                            if ph in cell.text:
+                                cell.text = cell.text.replace(ph, value)
+
+        # Generate unique filename
+        customer = sanitize_filename(formatted_data.get("MARK", "Customer"))
+        pdf_name = f"Invoice_{invoice_number}_{customer}.pdf"
         pdf_path = os.path.join(output_folder, pdf_name)
         
-        # Handle filename conflicts
+        # Handle duplicates
         counter = 1
         while os.path.exists(pdf_path):
-            pdf_name = f"Invoice_{invoice_number}_{sanitize_filename(customer_name)}_{counter}.pdf"
+            pdf_name = f"Invoice_{invoice_number}_{customer}_{counter}.pdf"
             pdf_path = os.path.join(output_folder, pdf_name)
             counter += 1
-        
-        # Save and convert
+
+        # Convert to PDF
         temp_docx = os.path.join(output_folder, f"temp_{invoice_number}.docx")
         doc.save(temp_docx)
         
-        if convert_docx_to_pdf(temp_docx, pdf_path):
+        if convert_docx_to_pdf(temp_docx, pdf_path) and validate_pdf(pdf_path):
             os.remove(temp_docx)
             return pdf_path
-        return None
         
-    except Exception as e:
-        st.error(f"Template processing error: {str(e)}")
-        raise
+        os.remove(temp_docx)
+        return None
 
-def update_notification_sheet(output_folder, pdf_name, customer_name, invoice_number, contact_number, invoice_total):
-    sheet_path = os.path.join(output_folder, "Customer_Notification_Sheet.xlsx")
-    
-    new_entry = pd.DataFrame([{
-        "CUSTOMER": customer_name,
-        "INVOICE NO": invoice_number,
-        "CONTACT NO": contact_number,
-        "INVOICE TOTAL": invoice_total,
-        "FILE PATH": pdf_name
+    except Exception as e:
+        st.error(f"Template processing failed: {str(e)}")
+        return None
+
+def update_notification_sheet(output_folder: str, pdf_name: str, customer: str, 
+                            invoice_number: int, contact: str, total: str):
+    """Update tracking spreadsheet"""
+    sheet_path = os.path.join(output_folder, "notification_log.xlsx")
+    new_data = pd.DataFrame([{
+        "Customer": customer,
+        "Invoice": invoice_number,
+        "Contact": contact,
+        "Amount": total,
+        "File": pdf_name
     }])
     
     if os.path.exists(sheet_path):
         try:
-            existing_data = pd.read_excel(sheet_path)
-            updated_data = pd.concat([existing_data, new_entry], ignore_index=True)
+            existing = pd.read_excel(sheet_path)
+            updated = pd.concat([existing, new_data])
+            updated.to_excel(sheet_path, index=False)
+            return
         except:
-            updated_data = new_entry
-    else:
-        updated_data = new_entry
-    
-    updated_data.to_excel(sheet_path, index=False)
+            pass
+    new_data.to_excel(sheet_path, index=False)
 
-def consolidate_rows(df):
-    consolidated_data = []
-    for customer_name, group in df.groupby("MARK"):
-        total_qty = group["QTY"].sum(skipna=True)
-        total_cbm = group["CBM"].sum(skipna=True)
+def consolidate_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Process raw data into invoice-ready format"""
+    consolidated = []
+    for customer, group in df.groupby("MARK"):
+        # Calculations
+        total_cbm = group["CBM"].sum()
+        charges = 10.00 if total_cbm < 0.05 else (group["CBM"] * group["PER CHARGES"]).sum()
+        total = charges + group["PARKING CHARGES"].iloc[0]
         
-        parking_charges = group["PARKING CHARGES"].dropna().iloc[0] if not group["PARKING CHARGES"].dropna().empty else 0
+        # Multi-line fields
+        fields = ["RECEIPT NO.", "QTY", "DESCRIPTION", "CBM", "WEIGHT(KG)"]
+        joined = {f: "\n".join(group[f].astype(str)) for f in fields}
         
-        if total_cbm < 0.05:
-            calculated_charges = 10.00
-        else:
-            calculated_charges = (group["CBM"] * group["PER CHARGES"]).sum(skipna=True)
-        
-        total_charges = calculated_charges + parking_charges
-        first_row = group.iloc[0]
-        
-        # Process multi-line values
-        receipt_nos = []
-        qtys = []
-        descriptions = []
-        cbms = []
-        weights = []
-        
-        for _, row in group.iterrows():
-            receipt_nos.append(str(row["RECEIPT NO."]) if pd.notna(row["RECEIPT NO."]) else "")
-            qtys.append(f"{row['QTY']:.2f}" if pd.notna(row['QTY']) else "")
-            descriptions.append(str(row["DESCRIPTION"]) if pd.notna(row["DESCRIPTION"]) else "")
-            cbms.append(f"{row['CBM']:.2f}" if pd.notna(row['CBM']) else "")
-            weights.append(f"{row['WEIGHT(KG)']:.2f}" if pd.notna(row['WEIGHT(KG)']) else "")
-        
-        consolidated_data.append({
-            "RECEIPT NO.": "\n".join(receipt_nos),
-            "QTY": "\n".join(qtys),
-            "DESCRIPTION": "\n".join(descriptions),
-            "CBM": "\n".join(cbms),
-            "WEIGHT(KG)": "\n".join(weights),
-            "PARKING CHARGES": f"{parking_charges:.2f}",
-            "PER CHARGES": f"{first_row['PER CHARGES']:.2f}" if pd.notna(first_row['PER CHARGES']) else "",
-            "TOTAL CHARGES": f"{total_charges:.2f}",
-            "MARK": customer_name,
-            "CONTACT NUMBER": str(first_row.get("CONTACT NUMBER", "")),
-            "CARGO NUMBER": str(first_row.get("CARGO NUMBER", "")),
-            "TRACKING NUMBER": str(first_row.get("TRACKING NUMBER", "")),
-            "TERMS": str(first_row.get("TERMS", "")),
-            "TOTAL QTY": f"{total_qty:.2f}",
+        # Build record
+        first = group.iloc[0]
+        consolidated.append({
+            **joined,
+            "PARKING CHARGES": f"{group['PARKING CHARGES'].iloc[0]:.2f}",
+            "PER CHARGES": f"{first['PER CHARGES']:.2f}",
+            "TOTAL CHARGES": f"{total:.2f}",
+            "MARK": customer,
+            "CONTACT NUMBER": first.get("CONTACT NUMBER", ""),
+            "CARGO NUMBER": first.get("CARGO NUMBER", ""),
             "TOTAL CBM": f"{total_cbm:.2f}",
-            "TOTAL CHARGES_SUM": f"{total_charges:.2f}",
-            "FLAT_RATE_APPLIED": "Yes" if total_cbm < 0.05 else "No"
+            "TOTAL CHARGES_SUM": f"{total:.2f}"
         })
-    return consolidated_data
+    return pd.DataFrame(consolidated)
 
-def get_binary_file_downloader_html(file_path, file_label):
-    """Generate a download link for files"""
-    with open(file_path, 'rb') as f:
-        data = f.read()
-    bin_str = base64.b64encode(data).decode()
-    href = f'<a href="data:application/octet-stream;base64,{bin_str}" download="{os.path.basename(file_path)}">{file_label}</a>'
-    return href
+def create_download_link(file_path: str, label: str) -> str:
+    """Generate HTML download link"""
+    with open(file_path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
+    return f'<a href="data:application/octet-stream;base64,{b64}" download="{os.path.basename(file_path)}">{label}</a>'
 
 # Streamlit UI
-st.title("Invoice Generation System")
-
-# Sidebar
-st.sidebar.header("Quick Actions")
-st.sidebar.markdown("[Sample Excel Template](#)")
-
-# File Upload
-uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx", "xls"])
-
-if uploaded_file is not None:
-    try:
-        df = pd.read_excel(uploaded_file)
-        
-        # Initialize missing columns
-        for col in ["CARGO NUMBER", "TRACKING NUMBER", "TERMS", "PARKING CHARGES"]:
-            if col not in df.columns:
-                df[col] = "" if col != "PARKING CHARGES" else 0.0
-        
-        if "Weight Rate" not in df.columns:
-            df["Weight Rate"] = 0.0
-        if "PER CHARGES" not in df.columns:
-            df["PER CHARGES"] = 0.0
-
-        # Global Updates Section
-        st.header("Global Settings")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            global_per_charge = st.number_input("Default Rate", value=float(df["PER CHARGES"].iloc[0]) if not df["PER CHARGES"].empty else 0.0)
-        with col2:
-            global_weight_rate = st.number_input("Weight Rate", value=float(df["Weight Rate"].iloc[0]) if not df["Weight Rate"].empty else 0.0)
-        with col3:
-            global_parking = st.number_input("Parking Fee", value=0.0)
-        
-        if st.button("Apply Globally"):
-            df["PER CHARGES"] = global_per_charge
-            df["Weight Rate"] = global_weight_rate
-            df["PARKING CHARGES"] = global_parking
-            st.success("Settings applied to all customers!")
-
-        # Customer-level Editing
-        st.header("Customer Adjustments")
-        customers = df["MARK"].unique()
-        
-        for customer in customers:
-            with st.expander(f"Customer: {customer}"):
-                cols = st.columns(3)
-                with cols[0]:
-                    new_rate = st.number_input(f"Rate for {customer}", 
-                        value=float(df[df["MARK"] == customer]["PER CHARGES"].iloc[0]),
-                        key=f"rate_{customer}")
-                with cols[1]:
-                    new_weight = st.number_input(f"Weight Rate for {customer}",
-                        value=float(df[df["MARK"] == customer]["Weight Rate"].iloc[0]),
-                        key=f"weight_{customer}")
-                with cols[2]:
-                    new_parking = st.number_input(f"Parking for {customer}",
-                        value=float(df[df["MARK"] == customer]["PARKING CHARGES"].iloc[0]),
-                        key=f"parking_{customer}")
-                
-                if st.button(f"Update {customer}"):
-                    df.loc[df["MARK"] == customer, "PER CHARGES"] = new_rate
-                    df.loc[df["MARK"] == customer, "Weight Rate"] = new_weight
-                    df.loc[df["MARK"] == customer, "PARKING CHARGES"] = new_parking
-                    st.success(f"Updated {customer}")
-
-        # Calculations
-        df["Weight CBM"] = df["WEIGHT(KG)"] / df["Weight Rate"]
-        df["CBM"] = df[["MEAS.(CBM)", "Weight CBM"]].max(axis=1)
-        df["Calculated Charges"] = df["CBM"] * df["PER CHARGES"]
-        
-        consolidated_data = consolidate_rows(df)
-        consolidated_df = pd.DataFrame(consolidated_data)
-        
-        st.header("Processed Data")
-        st.dataframe(consolidated_df)
-
-        # Invoice Generation
-        st.header("Invoice Generation")
-        last_invoice = st.number_input("Starting Invoice Number", min_value=1, value=1)
-        
-        if st.button("Generate All Invoices"):
-            if os.path.exists(OUTPUT_FOLDER):
-                shutil.rmtree(OUTPUT_FOLDER)
-            os.makedirs(OUTPUT_FOLDER)
+def main():
+    st.title("Invoice Generation System")
+    
+    # File Upload
+    uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx", "xls"])
+    
+    if uploaded_file:
+        try:
+            df = pd.read_excel(uploaded_file)
             
-            progress_bar = st.progress(0)
-            status_text = st.empty()
+            # Initialize missing columns
+            for col in ["PARKING CHARGES", "PER CHARGES", "Weight Rate"]:
+                if col not in df.columns:
+                    df[col] = 0.0 if col != "Weight Rate" else 1.0
             
-            for i, (_, row) in enumerate(consolidated_df.iterrows()):
-                status_text.text(f"Processing {i+1}/{len(consolidated_df)}: {row['MARK']}")
-                progress_bar.progress((i + 1) / len(consolidated_df))
+            # Global Settings UI
+            st.header("Global Settings")
+            defaults = {
+                "PER CHARGES": st.number_input("Default Rate", value=float(df["PER CHARGES"].iloc[0])),
+                "PARKING CHARGES": st.number_input("Parking Fee", value=0.0)
+            }
+            
+            if st.button("Apply Globally"):
+                df["PER CHARGES"] = defaults["PER CHARGES"]
+                df["PARKING CHARGES"] = defaults["PARKING CHARGES"]
+                st.success("Settings applied!")
+            
+            # Process data
+            df["CBM"] = df[["MEAS.(CBM)", "WEIGHT(KG)"]].max(axis=1)
+            consolidated_df = consolidate_data(df)
+            
+            st.header("Processed Data")
+            st.dataframe(consolidated_df)
+            
+            # Invoice Generation
+            st.header("Invoice Generation")
+            start_num = st.number_input("Starting Invoice #", min_value=1, value=1)
+            
+            if st.button("Generate All Invoices"):
+                if os.path.exists(OUTPUT_FOLDER):
+                    shutil.rmtree(OUTPUT_FOLDER)
+                os.makedirs(OUTPUT_FOLDER)
                 
-                template_data = {
-                    "RECEIPT NO": row["RECEIPT NO."],
-                    "QTY": row["QTY"],
-                    "DESCRIPTION": row["DESCRIPTION"],
-                    "WEIGHT(KG)": row["WEIGHT(KG)"],
-                    "CONTACT NUMBER": row["CONTACT NUMBER"],
-                    "CBM": row["CBM"],
-                    "PER CHARGES": row["PER CHARGES"],
-                    "PARKING CHARGES": row["PARKING CHARGES"],
-                    "TOTAL CHARGES": row["TOTAL CHARGES_SUM"],
-                    "MARK": row["MARK"],
-                    "TOTAL QTY": row["TOTAL QTY"],
-                    "TOTAL CBM": row["TOTAL CBM"],
-                    "CARGO NUMBER": row["CARGO NUMBER"],
-                    "TRACKING NUMBER": row["TRACKING NUMBER"],
-                    "TERMS": row["TERMS"]
-                }
+                progress_bar = st.progress(0)
+                status_text = st.empty()
                 
+                for i, (_, row) in enumerate(consolidated_df.iterrows()):
+                    status_text.text(f"Processing {i+1}/{len(consolidated_df)}")
+                    progress_bar.progress((i + 1) / len(consolidated_df))
+                    
+                    pdf_path = generate_pdf_from_template(
+                        TEMPLATE_PATH,
+                        row.to_dict(),
+                        OUTPUT_FOLDER,
+                        start_num + i
+                    )
+                    
+                    if pdf_path:
+                        update_notification_sheet(
+                            OUTPUT_FOLDER,
+                            os.path.basename(pdf_path),
+                            row["MARK"],
+                            start_num + i,
+                            row["CONTACT NUMBER"],
+                            row["TOTAL CHARGES_SUM"]
+                        )
+                
+                # Create ZIP archive
+                zip_path = os.path.join(OUTPUT_FOLDER, "invoices.zip")
+                with zipfile.ZipFile(zip_path, 'w') as zipf:
+                    for file in os.listdir(OUTPUT_FOLDER):
+                        if file.endswith('.pdf'):
+                            zipf.write(
+                                os.path.join(OUTPUT_FOLDER, file), 
+                                file
+                            )
+                
+                st.markdown(
+                    create_download_link(zip_path, "Download All Invoices"),
+                    unsafe_allow_html=True
+                )
+                st.success("All invoices generated!")
+            
+            # Single Invoice UI
+            st.subheader("Single Invoice")
+            customer = st.selectbox(
+                "Select Customer",
+                options=consolidated_df["MARK"].unique()
+            )
+            single_num = st.number_input(
+                "Invoice Number", 
+                min_value=1, 
+                value=start_num
+            )
+            
+            if st.button("Generate Selected Invoice"):
+                row = consolidated_df[consolidated_df["MARK"] == customer].iloc[0]
                 pdf_path = generate_pdf_from_template(
                     TEMPLATE_PATH,
-                    template_data,
+                    row.to_dict(),
                     OUTPUT_FOLDER,
-                    last_invoice + i
+                    single_num
                 )
-            
-            progress_bar.empty()
-            status_text.success("Invoice generation complete!")
-            
-            # Create zip of all invoices
-            zip_path = os.path.join(OUTPUT_FOLDER, "invoices.zip")
-            with zipfile.ZipFile(zip_path, 'w') as zipf:
-                for file in os.listdir(OUTPUT_FOLDER):
-                    if file.endswith('.pdf'):
-                        zipf.write(os.path.join(OUTPUT_FOLDER, file), file)
-            
-            st.markdown(get_binary_file_downloader_html(zip_path, "Download All Invoices"), unsafe_allow_html=True)
+                
+                if pdf_path:
+                    with open(pdf_path, "rb") as f:
+                        st.download_button(
+                            "Download Invoice",
+                            f,
+                            file_name=os.path.basename(pdf_path),
+                            mime="application/pdf"
+                        )
+                    st.success("Invoice generated!")
+        
+        except Exception as e:
+            st.error(f"Processing error: {str(e)}")
 
-    except Exception as e:
-        st.error(f"Error processing file: {str(e)}") 
-
-# Individual Invoice Generation 
-st.subheader("Generate Single Invoice")
-selected_customer = st.selectbox(
-    "Select Customer", 
-    options=consolidated_df["MARK"].unique(),
-    key="single_customer_select"
-)
-
-single_inv_num = st.number_input(
-    "Invoice Number", 
-    min_value=1, 
-    value=last_invoice,
-    key="single_invoice_num"
-)
-if st.button("Generate Selected Invoice"):
-    row = consolidated_df[consolidated_df["MARK"] == selected_customer].iloc[0]
-    template_data = {
-        "RECEIPT NO": row["RECEIPT NO."],
-        "QTY": row["QTY"],
-        "DESCRIPTION": row["DESCRIPTION"],
-        # ... (include all other fields from your bulk generation)
-    }
-    
-    pdf_path = generate_pdf_from_template(
-        TEMPLATE_PATH,
-        template_data,
-        OUTPUT_FOLDER,
-        single_inv_num
-    )
-    
-    if pdf_path:
-        update_notification_sheet(
-            OUTPUT_FOLDER,
-            os.path.basename(pdf_path),
-            row["MARK"],
-            single_inv_num,
-            row["CONTACT NUMBER"],
-            row["TOTAL CHARGES_SUM"]
-        )
-        with open(pdf_path, "rb") as f:
-            st.download_button(
-                label="Download Invoice",
-                data=f,
-                file_name=os.path.basename(pdf_path),
-                mime="application/pdf"
-            )
-        st.success(f"Invoice #{single_inv_num} generated!")
+if __name__ == "__main__":
+    main()
