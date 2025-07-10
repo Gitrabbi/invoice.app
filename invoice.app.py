@@ -24,7 +24,6 @@ def sanitize_filename(name: str) -> str:
 def convert_docx_to_pdf(docx_path: str, pdf_path: str) -> bool:
     """Convert DOCX to PDF using LibreOffice"""
     try:
-        # First try headless LibreOffice conversion
         result = subprocess.run(
             ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", 
              os.path.dirname(pdf_path), docx_path],
@@ -34,7 +33,6 @@ def convert_docx_to_pdf(docx_path: str, pdf_path: str) -> bool:
             timeout=30
         )
         
-        # Get the automatically generated PDF name
         base_name = os.path.splitext(os.path.basename(docx_path))[0]
         temp_pdf = os.path.join(os.path.dirname(pdf_path), f"{base_name}.pdf")
         
@@ -44,7 +42,7 @@ def convert_docx_to_pdf(docx_path: str, pdf_path: str) -> bool:
         return False
         
     except Exception as e:
-        st.error(f"PDF conversion failed. Please ensure LibreOffice is installed. Error: {str(e)}")
+        st.error(f"PDF conversion failed. Error: {str(e)}")
         return False
 
 def validate_pdf(pdf_path: str) -> bool:
@@ -76,13 +74,12 @@ def generate_pdf_from_template(
         formatted_data.update({
             "DATE": current_date,
             "INVOICE NUMBER": str(invoice_number),
-            # Ensure all placeholders are included
             "TRACKING NUMBER": row_data.get("TRACKING NUMBER", ""),
             "TERMS": row_data.get("TERMS", ""),
             "TOTAL QTY": row_data.get("TOTAL QTY", "")
         })
 
-        # Add invoice header with number and date above logo
+        # Add invoice header
         if len(doc.paragraphs) > 0:
             first_para = doc.paragraphs[0]
             first_para.text = f"Invoice #: {invoice_number}\nDate: {current_date}\n" + first_para.text
@@ -90,14 +87,13 @@ def generate_pdf_from_template(
                 run.font.size = Pt(10)
                 run.bold = True
 
-        # Replace placeholders in paragraphs
+        # Replace placeholders
         for paragraph in doc.paragraphs:
             for key, value in formatted_data.items():
                 for ph in [f"{{{{{key}}}}}", f"{{{{{key}.}}}}"]:
                     if ph in paragraph.text:
                         paragraph.text = paragraph.text.replace(ph, value)
 
-        # Replace placeholders in tables
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
@@ -156,34 +152,41 @@ def update_notification_sheet(output_folder: str, pdf_name: str, customer: str,
     new_data.to_excel(sheet_path, index=False)
 
 def consolidate_data(df: pd.DataFrame) -> pd.DataFrame:
-    """Process raw data into invoice-ready format"""
+    """Process raw data into invoice-ready format with original calculation logic"""
     consolidated = []
     for customer, group in df.groupby("MARK"):
-        # Calculations
-        total_qty = group["QTY"].sum()
-        total_cbm = group["CBM"].sum()
-        charges = 10.00 if total_cbm < 0.05 else (group["CBM"] * group["PER CHARGES"]).sum()
-        total = charges + group["PARKING CHARGES"].iloc[0]
+        # Original calculation logic
+        total_qty = group["QTY"].sum(skipna=True)
+        total_cbm = group["CBM"].sum(skipna=True)
+        
+        parking_charges = group["PARKING CHARGES"].dropna().iloc[0] if not group["PARKING CHARGES"].dropna().empty else 0
+        
+        if total_cbm < 0.05:
+            calculated_charges = 10.00
+        else:
+            calculated_charges = (group["CBM"] * group["PER CHARGES"]).sum(skipna=True)
+        
+        total_charges = calculated_charges + parking_charges
+        first_row = group.iloc[0]
         
         # Multi-line fields
         fields = ["RECEIPT NO.", "QTY", "DESCRIPTION", "CBM", "WEIGHT(KG)"]
         joined = {f: "\n".join(group[f].astype(str)) for f in fields}
         
         # Build record with all required fields
-        first = group.iloc[0]
         consolidated.append({
             **joined,
-            "PARKING CHARGES": f"{group['PARKING CHARGES'].iloc[0]:.2f}",
-            "PER CHARGES": f"{first['PER CHARGES']:.2f}",
-            "TOTAL CHARGES": f"{total:.2f}",
+            "PARKING CHARGES": f"{parking_charges:.2f}",
+            "PER CHARGES": f"{first_row['PER CHARGES']:.2f}" if pd.notna(first_row['PER CHARGES']) else "",
+            "TOTAL CHARGES": f"{total_charges:.2f}",
             "MARK": customer,
-            "CONTACT NUMBER": str(first.get("CONTACT NUMBER", "")),
-            "CARGO NUMBER": str(first.get("CARGO NUMBER", "")),
-            "TRACKING NUMBER": str(first.get("TRACKING NUMBER", "")),
-            "TERMS": str(first.get("TERMS", "")),
+            "CONTACT NUMBER": str(first_row.get("CONTACT NUMBER", "")),
+            "CARGO NUMBER": str(first_row.get("CARGO NUMBER", "")),
+            "TRACKING NUMBER": str(first_row.get("TRACKING NUMBER", "")),
+            "TERMS": str(first_row.get("TERMS", "")),
             "TOTAL QTY": f"{total_qty:.2f}",
             "TOTAL CBM": f"{total_cbm:.2f}",
-            "TOTAL CHARGES_SUM": f"{total:.2f}",
+            "TOTAL CHARGES_SUM": f"{total_charges:.2f}",
             "FLAT_RATE_APPLIED": "Yes" if total_cbm < 0.05 else "No"
         })
     return pd.DataFrame(consolidated)
@@ -208,12 +211,13 @@ def display_customer_markdowns(df: pd.DataFrame):
             **Total Charges:** ${customer_data.get('TOTAL CHARGES_SUM', 'N/A')}  
             **Tracking Number:** {customer_data.get('TRACKING NUMBER', 'N/A')}  
             **Terms:** {customer_data.get('TERMS', 'N/A')}
+            **Flat Rate Applied:** {customer_data.get('FLAT_RATE_APPLIED', 'No')}
             """)
 
 def main():
     st.title("📄 Invoice Generation System")
     
-    # Initialize session state for persistent values
+    # Initialize session state
     if 'global_defaults' not in st.session_state:
         st.session_state.global_defaults = {
             'PER_CHARGES': None,
@@ -234,7 +238,10 @@ def main():
             'WEIGHT_RATE': None,
             'PARKING_CHARGES': None
         }
-        st.experimental_rerun()
+        if os.path.exists(OUTPUT_FOLDER):
+            shutil.rmtree(OUTPUT_FOLDER)
+        os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+        st.rerun()
     
     if st.sidebar.button("ℹ️ Help"):
         st.sidebar.info("""
@@ -256,10 +263,14 @@ def main():
             for col in ["PARKING CHARGES", "PER CHARGES", "Weight Rate", 
                        "TRACKING NUMBER", "TERMS"]:
                 if col not in df.columns:
-                    default_value = 0.0 if col in ["PARKING CHARGES", "PER CHARGES", "Weight Rate"] else ""
+                    default_value = 0.0 if col in ["PARKING CHARGES", "PER CHARGES"] else (1.0 if col == "Weight Rate" else "")
                     df[col] = default_value
             
-            # Global Settings UI with persistent values
+            # Handle zero weight rates
+            if "Weight Rate" in df.columns:
+                df["Weight Rate"] = df["Weight Rate"].replace(0, 1.0)
+            
+            # Global Settings UI
             st.header("⚙️ Global Settings")
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -276,7 +287,7 @@ def main():
                 default_weight_rate = st.number_input(
                     "Default Weight Rate (kg/CBM)",
                     value=st.session_state.global_defaults['WEIGHT_RATE'] or current_weight_rate,
-                    min_value=0.0,
+                    min_value=0.1,
                     step=0.1,
                     key="global_weight_rate"
                 )
@@ -301,8 +312,9 @@ def main():
                 df["PARKING CHARGES"] = default_parking
                 st.success("Global settings applied to all customers!")
             
-            # Process data
-            df["CBM"] = df[["MEAS.(CBM)", "WEIGHT(KG)"]].max(axis=1)
+            # Process data with original calculation logic
+            df["Weight CBM"] = df["WEIGHT(KG)"] / df["Weight Rate"]
+            df["CBM"] = df[["MEAS.(CBM)", "Weight CBM"]].max(axis=1)
             st.session_state.consolidated_df = consolidate_data(df)
             
             # Display customer markdowns
