@@ -276,7 +276,7 @@ def main():
                 default_weight_rate = st.number_input(
                     "Default Weight Rate (kg/CBM)",
                     value=st.session_state.global_defaults['WEIGHT_RATE'] or current_weight_rate,
-                    min_value=0.1,
+                    min_value=0.0,
                     step=0.1,
                     key="global_weight_rate"
                 )
