@@ -1,21 +1,19 @@
 import os
 import re
+import streamlit as st
+import pandas as pd
+from docx import Document
+from docx.shared import Pt
 import tempfile
 import shutil
 from datetime import datetime
-from io import BytesIO
 import base64
+from io import BytesIO
 import zipfile
-from docx import Document
-import streamlit as st
-import pandas as pd
-from pypdf import PdfWriter
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle
-from reportlab.lib import colors
+from fpdf import FPDF
+from pdf2docx import Converter
 
-# Configuration
+# Cloud-friendly path configuration
 TEMPLATE_PATH = "invoice_template.docx"
 OUTPUT_FOLDER = "generated_invoices"
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
@@ -23,106 +21,111 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 def sanitize_filename(name):
     return re.sub(r'[\\/:*?"<>|]', '_', name)
 
-def generate_pdf_from_docx(docx_path, pdf_path):
-    """Convert DOCX to PDF while perfectly preserving template layout"""
+def convert_docx_to_pdf(docx_path, pdf_path):
+    """Cloud-compatible DOCX to PDF conversion with fallbacks"""
     try:
-        doc = Document(docx_path)
-        buffer = BytesIO()
-        
-        pdf = SimpleDocTemplate(
-            buffer,
-            pagesize=letter,
-            leftMargin=40,
-            rightMargin=40,
-            topMargin=40,
-            bottomMargin=40
-        )
-        
-        styles = getSampleStyleSheet()
-        elements = []
-        
-        # Process all paragraphs
-        for para in doc.paragraphs:
-            if para.text.strip():
-                p = Paragraph(para.text, styles["Normal"])
-                elements.append(p)
-        
-        # Process all tables
-        for table in doc.tables:
-            table_data = []
-            for row in table.rows:
-                row_data = [cell.text for cell in row.cells]
-                table_data.append(row_data)
-            
-            tbl = Table(table_data)
-            tbl.setStyle(TableStyle([
-                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#4F81BD')),
-                ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-                ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0,0), (-1,0), 10),
-                ('BOTTOMPADDING', (0,0), (-1,0), 12),
-                ('BACKGROUND', (0,1), (-1,-1), colors.HexColor('#DCE6F1')),
-                ('GRID', (0,0), (-1,-1), 1, colors.black),
-                ('VALIGN', (0,0), (-1,-1), 'TOP')
-            ]))
-            elements.append(tbl)
-        
-        pdf.build(elements)
-        
-        with open(pdf_path, "wb") as f:
-            f.write(buffer.getvalue())
-        
+        # First try pdf2docx (better formatting)
+        cv = Converter(docx_path)
+        cv.convert(pdf_path)
+        cv.close()
         return True
-        
     except Exception as e:
-        st.error(f"PDF conversion error: {str(e)}")
-        return False
+        st.warning(f"PDF conversion (pdf2docx) warning: {str(e)}")
+        try:
+            # Fallback to FPDF
+            doc = Document(docx_path)
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=8)
+            
+            for para in doc.paragraphs:
+                pdf.cell(200, 5, txt=para.text, ln=True)
+                
+            pdf.output(pdf_path)
+            return True
+        except Exception as e:
+            st.error(f"PDF conversion (FPDF) failed: {str(e)}")
+            return False
 
-def generate_invoice(row_data, invoice_number):
-    """Generate invoice using template with all placeholders"""
+def generate_pdf_from_template(template_path, row_data, output_folder, invoice_number):
     try:
-        temp_docx = os.path.join(tempfile.gettempdir(), f"temp_{invoice_number}.docx")
-        customer_name = sanitize_filename(row_data.get('MARK', 'Customer'))
-        pdf_name = f"Invoice_{invoice_number}_{customer_name}.pdf"
-        pdf_path = os.path.join(OUTPUT_FOLDER, pdf_name)
+        doc = Document(template_path)
         
-        doc = Document(TEMPLATE_PATH)
+        # Set default font size to 8pt
+        style = doc.styles['Normal']
+        font = style.font
+        font.size = Pt(8)
         
+        # Format numeric values
+        for key, value in row_data.items():
+            if isinstance(value, (int, float)):
+                row_data[key] = f"{value:.2f}" if pd.notna(value) else ""
+        
+        # Set invoice number and date
         current_date = datetime.now().strftime("%Y-%m-%d")
         row_data.update({
             "DATE": current_date,
             "INVOICE NUMBER": str(invoice_number)
         })
         
+        # Add invoice header
+        if len(doc.paragraphs) > 0:
+            p = doc.paragraphs[0]
+            p.text = f"Invoice #: {invoice_number}\nDate: {current_date}\n" + p.text
+            for run in p.runs:
+                run.font.size = Pt(8)
+        else:
+            p = doc.add_paragraph(f"Invoice #: {invoice_number}\nDate: {current_date}")
+            p.style.font.size = Pt(8)
+        
+        # Replace placeholders
         for paragraph in doc.paragraphs:
             for key, value in row_data.items():
-                if isinstance(value, (int, float)):
-                    value = f"{value:.2f}" if pd.notna(value) else ""
                 for placeholder in [f"{{{{{key}}}}}", f"{{{{{key}.}}}}"]:
                     if placeholder in paragraph.text:
                         paragraph.text = paragraph.text.replace(placeholder, str(value))
+            for run in paragraph.runs:
+                run.font.size = Pt(8)
         
+        # Process tables
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     for key, value in row_data.items():
-                        if isinstance(value, (int, float)):
-                            value = f"{value:.2f}" if pd.notna(value) else ""
                         for placeholder in [f"{{{{{key}}}}}", f"{{{{{key}.}}}}"]:
                             if placeholder in cell.text:
                                 cell.text = cell.text.replace(placeholder, str(value))
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.size = Pt(8)
         
+        # Generate filename
+        customer_name = row_data.get("MARK", "Customer")
+        contact_number = row_data.get("CONTACT NUMBER", "")
+        invoice_total = row_data.get("TOTAL CHARGES_SUM", "0.00")
+        
+        pdf_name = f"Invoice_{invoice_number}_{sanitize_filename(customer_name)}_{sanitize_filename(contact_number)}_{sanitize_filename(invoice_total)}.pdf"
+        pdf_path = os.path.join(output_folder, pdf_name)
+        
+        # Handle filename conflicts
+        counter = 1
+        while os.path.exists(pdf_path):
+            pdf_name = f"Invoice_{invoice_number}_{sanitize_filename(customer_name)}_{counter}.pdf"
+            pdf_path = os.path.join(output_folder, pdf_name)
+            counter += 1
+        
+        # Save and convert
+        temp_docx = os.path.join(output_folder, f"temp_{invoice_number}.docx")
         doc.save(temp_docx)
         
-        if generate_pdf_from_docx(temp_docx, pdf_path):
+        if convert_docx_to_pdf(temp_docx, pdf_path):
             os.remove(temp_docx)
             return pdf_path
         return None
         
     except Exception as e:
-        st.error(f"Invoice generation failed: {str(e)}")
-        return None
+        st.error(f"Template processing error: {str(e)}")
+        raise
 
 def update_notification_sheet(output_folder, pdf_name, customer_name, invoice_number, contact_number, invoice_total):
     sheet_path = os.path.join(output_folder, "Customer_Notification_Sheet.xlsx")
@@ -162,6 +165,7 @@ def consolidate_rows(df):
         total_charges = calculated_charges + parking_charges
         first_row = group.iloc[0]
         
+        # Process multi-line values
         receipt_nos = []
         qtys = []
         descriptions = []
@@ -197,6 +201,7 @@ def consolidate_rows(df):
     return consolidated_data
 
 def get_binary_file_downloader_html(file_path, file_label):
+    """Generate a download link for files"""
     with open(file_path, 'rb') as f:
         data = f.read()
     bin_str = base64.b64encode(data).decode()
@@ -210,7 +215,7 @@ st.title("Invoice Generation System")
 st.sidebar.header("Quick Actions")
 st.sidebar.markdown("[Sample Excel Template](#)")
 
-# Main interface
+# File Upload
 uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx", "xls"])
 
 if uploaded_file is not None:
@@ -227,7 +232,7 @@ if uploaded_file is not None:
         if "PER CHARGES" not in df.columns:
             df["PER CHARGES"] = 0.0
 
-        # Global Settings
+        # Global Updates Section
         st.header("Global Settings")
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -277,8 +282,6 @@ if uploaded_file is not None:
         consolidated_data = consolidate_rows(df)
         consolidated_df = pd.DataFrame(consolidated_data)
         
-        st.session_state.consolidated_df = consolidated_df
-        
         st.header("Processed Data")
         st.dataframe(consolidated_df)
 
@@ -286,37 +289,6 @@ if uploaded_file is not None:
         st.header("Invoice Generation")
         last_invoice = st.number_input("Starting Invoice Number", min_value=1, value=1)
         
-        # Individual Invoice Generation
-        st.subheader("Generate Single Invoice")
-        selected_customer = st.selectbox(
-            "Select Customer", 
-            options=consolidated_df["MARK"].unique()
-        )
-        single_inv_num = st.number_input("Invoice Number", min_value=1, value=last_invoice)
-        
-        if st.button("Generate Selected Invoice"):
-            row = consolidated_df[consolidated_df["MARK"] == selected_customer].iloc[0]
-            pdf_path = generate_invoice(row, single_inv_num)
-            if pdf_path:
-                update_notification_sheet(
-                    OUTPUT_FOLDER,
-                    os.path.basename(pdf_path),
-                    row["MARK"],
-                    single_inv_num,
-                    row["CONTACT NUMBER"],
-                    row["TOTAL CHARGES_SUM"]
-                )
-                with open(pdf_path, "rb") as f:
-                    st.download_button(
-                        label="Download Invoice",
-                        data=f,
-                        file_name=os.path.basename(pdf_path),
-                        mime="application/pdf"
-                    )
-                st.success(f"Invoice #{single_inv_num} generated successfully!")
-
-        # Bulk Generation
-        st.subheader("Generate All Invoices")
         if st.button("Generate All Invoices"):
             if os.path.exists(OUTPUT_FOLDER):
                 shutil.rmtree(OUTPUT_FOLDER)
@@ -329,20 +301,35 @@ if uploaded_file is not None:
                 status_text.text(f"Processing {i+1}/{len(consolidated_df)}: {row['MARK']}")
                 progress_bar.progress((i + 1) / len(consolidated_df))
                 
-                pdf_path = generate_invoice(row, last_invoice + i)
-                if pdf_path:
-                    update_notification_sheet(
-                        OUTPUT_FOLDER,
-                        os.path.basename(pdf_path),
-                        row["MARK"],
-                        last_invoice + i,
-                        row["CONTACT NUMBER"],
-                        row["TOTAL CHARGES_SUM"]
-                    )
+                template_data = {
+                    "RECEIPT NO": row["RECEIPT NO."],
+                    "QTY": row["QTY"],
+                    "DESCRIPTION": row["DESCRIPTION"],
+                    "WEIGHT(KG)": row["WEIGHT(KG)"],
+                    "CONTACT NUMBER": row["CONTACT NUMBER"],
+                    "CBM": row["CBM"],
+                    "PER CHARGES": row["PER CHARGES"],
+                    "PARKING CHARGES": row["PARKING CHARGES"],
+                    "TOTAL CHARGES": row["TOTAL CHARGES_SUM"],
+                    "MARK": row["MARK"],
+                    "TOTAL QTY": row["TOTAL QTY"],
+                    "TOTAL CBM": row["TOTAL CBM"],
+                    "CARGO NUMBER": row["CARGO NUMBER"],
+                    "TRACKING NUMBER": row["TRACKING NUMBER"],
+                    "TERMS": row["TERMS"]
+                }
+                
+                pdf_path = generate_pdf_from_template(
+                    TEMPLATE_PATH,
+                    template_data,
+                    OUTPUT_FOLDER,
+                    last_invoice + i
+                )
             
             progress_bar.empty()
             status_text.success("Invoice generation complete!")
             
+            # Create zip of all invoices
             zip_path = os.path.join(OUTPUT_FOLDER, "invoices.zip")
             with zipfile.ZipFile(zip_path, 'w') as zipf:
                 for file in os.listdir(OUTPUT_FOLDER):
@@ -352,4 +339,52 @@ if uploaded_file is not None:
             st.markdown(get_binary_file_downloader_html(zip_path, "Download All Invoices"), unsafe_allow_html=True)
 
     except Exception as e:
-        st.error(f"Error processing file: {str(e)}")
+        st.error(f"Error processing file: {str(e)}") 
+
+# Individual Invoice Generation 
+st.subheader("Generate Single Invoice")
+selected_customer = st.selectbox(
+    "Select Customer", 
+    options=consolidated_df["MARK"].unique(),
+    key="single_customer_select"
+)
+
+single_inv_num = st.number_input(
+    "Invoice Number", 
+    min_value=1, 
+    value=last_invoice,
+    key="single_invoice_num"
+)
+if st.button("Generate Selected Invoice"):
+    row = consolidated_df[consolidated_df["MARK"] == selected_customer].iloc[0]
+    template_data = {
+        "RECEIPT NO": row["RECEIPT NO."],
+        "QTY": row["QTY"],
+        "DESCRIPTION": row["DESCRIPTION"],
+        # ... (include all other fields from your bulk generation)
+    }
+    
+    pdf_path = generate_pdf_from_template(
+        TEMPLATE_PATH,
+        template_data,
+        OUTPUT_FOLDER,
+        single_inv_num
+    )
+    
+    if pdf_path:
+        update_notification_sheet(
+            OUTPUT_FOLDER,
+            os.path.basename(pdf_path),
+            row["MARK"],
+            single_inv_num,
+            row["CONTACT NUMBER"],
+            row["TOTAL CHARGES_SUM"]
+        )
+        with open(pdf_path, "rb") as f:
+            st.download_button(
+                label="Download Invoice",
+                data=f,
+                file_name=os.path.basename(pdf_path),
+                mime="application/pdf"
+            )
+        st.success(f"Invoice #{single_inv_num} generated!")
