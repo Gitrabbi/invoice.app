@@ -65,11 +65,18 @@ def generate_pdf_from_template(
         style = doc.styles['Normal']
         style.font.size = Pt(8)
 
+        # Ensure all financial values are properly formatted
+        financial_fields = [
+            'PER CHARGES', 'PARKING CHARGES', 'TOTAL CHARGES', 
+            'TOTAL CHARGES_SUM', 'RATE', 'CALCULATED_CHARGES'
+        ]
+        
         # Format values
         formatted_data = {
-            k: f"{v:.2f}" if isinstance(v, (int, float)) else str(v)
+            k: f"{float(v):.2f}" if k in financial_fields and str(v).replace('.','',1).isdigit() else str(v)
             for k, v in row_data.items()
         }
+        
         current_date = datetime.now().strftime("%Y-%m-%d")
         formatted_data.update({
             "DATE": current_date,
@@ -87,7 +94,7 @@ def generate_pdf_from_template(
                 run.font.size = Pt(10)
                 run.bold = True
 
-        # Replace placeholders
+        # Replace placeholders - including the rate
         for paragraph in doc.paragraphs:
             for key, value in formatted_data.items():
                 for ph in [f"{{{{{key}}}}}", f"{{{{{key}.}}}}"]:
@@ -107,13 +114,6 @@ def generate_pdf_from_template(
         pdf_name = f"Invoice_{invoice_number}_{customer}.pdf"
         pdf_path = os.path.join(output_folder, pdf_name)
         
-        # Handle duplicates
-        counter = 1
-        while os.path.exists(pdf_path):
-            pdf_name = f"Invoice_{invoice_number}_{customer}_{counter}.pdf"
-            pdf_path = os.path.join(output_folder, pdf_name)
-            counter += 1
-
         # Save and convert
         temp_docx = os.path.join(output_folder, f"temp_{invoice_number}.docx")
         doc.save(temp_docx)
@@ -128,7 +128,6 @@ def generate_pdf_from_template(
     except Exception as e:
         st.error(f"Template processing failed: {str(e)}")
         return None
-
 def update_notification_sheet(output_folder: str, pdf_name: str, customer: str, 
                             invoice_number: int, contact: str, total: str):
     """Update tracking spreadsheet"""
@@ -161,9 +160,12 @@ def consolidate_data(df: pd.DataFrame) -> pd.DataFrame:
         
         parking_charges = group["PARKING CHARGES"].dropna().iloc[0] if not group["PARKING CHARGES"].dropna().empty else 0
         
+        # Calculate charges based on original logic
         if total_cbm < 0.05:
             calculated_charges = 10.00
+            rate_applied = 10.00  # Flat rate
         else:
+            rate_applied = group["PER CHARGES"].iloc[0]
             calculated_charges = (group["CBM"] * group["PER CHARGES"]).sum(skipna=True)
         
         total_charges = calculated_charges + parking_charges
@@ -173,11 +175,12 @@ def consolidate_data(df: pd.DataFrame) -> pd.DataFrame:
         fields = ["RECEIPT NO.", "QTY", "DESCRIPTION", "CBM", "WEIGHT(KG)"]
         joined = {f: "\n".join(group[f].astype(str)) for f in fields}
         
-        # Build record with all required fields
+        # Build record with all required fields including rate
         consolidated.append({
             **joined,
             "PARKING CHARGES": f"{parking_charges:.2f}",
-            "PER CHARGES": f"{first_row['PER CHARGES']:.2f}" if pd.notna(first_row['PER CHARGES']) else "",
+            "PER CHARGES": f"{rate_applied:.2f}",  # This shows the actual rate applied
+            "RATE": f"{rate_applied:.2f}",  # Additional field for display
             "TOTAL CHARGES": f"{total_charges:.2f}",
             "MARK": customer,
             "CONTACT NUMBER": str(first_row.get("CONTACT NUMBER", "")),
@@ -187,10 +190,10 @@ def consolidate_data(df: pd.DataFrame) -> pd.DataFrame:
             "TOTAL QTY": f"{total_qty:.2f}",
             "TOTAL CBM": f"{total_cbm:.2f}",
             "TOTAL CHARGES_SUM": f"{total_charges:.2f}",
-            "FLAT_RATE_APPLIED": "Yes" if total_cbm < 0.05 else "No"
+            "FLAT_RATE_APPLIED": "Yes" if total_cbm < 0.05 else "No",
+            "CALCULATED_CHARGES": calculated_charges  # For verification
         })
     return pd.DataFrame(consolidated)
-
 def create_download_link(file_path: str, label: str) -> str:
     """Generate HTML download link"""
     with open(file_path, "rb") as f:
