@@ -52,7 +52,7 @@ def convert_docx_to_pdf(docx_path, pdf_path):
             pdf.set_author("Invoice System")
             
             # Process paragraphs with proper encoding
-            doc = Document(docx_path)  # Need to read the DOCX for fallback
+            doc = Document(docx_path)
             for para in doc.paragraphs:
                 text = para.text.encode('latin-1', 'replace').decode('latin-1')
                 pdf.multi_cell(0, 5, txt=text)
@@ -62,6 +62,7 @@ def convert_docx_to_pdf(docx_path, pdf_path):
         except Exception as e:
             st.error(f"FPDF fallback failed: {str(e)}")
             return False
+
 def validate_pdf(pdf_path):
     """Check if PDF is readable by most viewers"""
     try:
@@ -70,15 +71,6 @@ def validate_pdf(pdf_path):
             return header == b"%PDF"
     except:
         return False
-
-# Usage in generate_pdf_from_template():
-if convert_docx_to_pdf(temp_docx, pdf_path):
-    if validate_pdf(pdf_path):
-        os.remove(temp_docx)
-        return pdf_path
-    else:
-        st.error("Generated PDF is corrupt")
-
 def generate_pdf_from_template(template_path, row_data, output_folder, invoice_number):
     try:
         doc = Document(template_path)
