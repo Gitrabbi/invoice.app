@@ -41,7 +41,7 @@ def convert_docx_to_pdf(docx_path, pdf_path):
     except Exception as e:
         st.warning(f"PDF conversion warning: {str(e)}")
         return False
-        try:
+    try:
     # Fallback to FPDF with improved settings
     pdf = FPDF()
     pdf.add_page()
