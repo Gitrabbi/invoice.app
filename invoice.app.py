@@ -72,10 +72,23 @@ def generate_pdf_from_template(
             k: f"{v:.2f}" if isinstance(v, (int, float)) else str(v)
             for k, v in row_data.items()
         }
+        current_date = datetime.now().strftime("%Y-%m-%d")
         formatted_data.update({
-            "DATE": datetime.now().strftime("%Y-%m-%d"),
-            "INVOICE NUMBER": str(invoice_number)
+            "DATE": current_date,
+            "INVOICE NUMBER": str(invoice_number),
+            # Ensure all placeholders are included
+            "TRACKING NUMBER": row_data.get("TRACKING NUMBER", ""),
+            "TERMS": row_data.get("TERMS", ""),
+            "TOTAL QTY": row_data.get("TOTAL QTY", "")
         })
+
+        # Add invoice header with number and date above logo
+        if len(doc.paragraphs) > 0:
+            first_para = doc.paragraphs[0]
+            first_para.text = f"Invoice #: {invoice_number}\nDate: {current_date}\n" + first_para.text
+            for run in first_para.runs:
+                run.font.size = Pt(10)
+                run.bold = True
 
         # Replace placeholders in paragraphs
         for paragraph in doc.paragraphs:
@@ -147,6 +160,7 @@ def consolidate_data(df: pd.DataFrame) -> pd.DataFrame:
     consolidated = []
     for customer, group in df.groupby("MARK"):
         # Calculations
+        total_qty = group["QTY"].sum()
         total_cbm = group["CBM"].sum()
         charges = 10.00 if total_cbm < 0.05 else (group["CBM"] * group["PER CHARGES"]).sum()
         total = charges + group["PARKING CHARGES"].iloc[0]
@@ -155,7 +169,7 @@ def consolidate_data(df: pd.DataFrame) -> pd.DataFrame:
         fields = ["RECEIPT NO.", "QTY", "DESCRIPTION", "CBM", "WEIGHT(KG)"]
         joined = {f: "\n".join(group[f].astype(str)) for f in fields}
         
-        # Build record
+        # Build record with all required fields
         first = group.iloc[0]
         consolidated.append({
             **joined,
@@ -163,10 +177,14 @@ def consolidate_data(df: pd.DataFrame) -> pd.DataFrame:
             "PER CHARGES": f"{first['PER CHARGES']:.2f}",
             "TOTAL CHARGES": f"{total:.2f}",
             "MARK": customer,
-            "CONTACT NUMBER": first.get("CONTACT NUMBER", ""),
-            "CARGO NUMBER": first.get("CARGO NUMBER", ""),
+            "CONTACT NUMBER": str(first.get("CONTACT NUMBER", "")),
+            "CARGO NUMBER": str(first.get("CARGO NUMBER", "")),
+            "TRACKING NUMBER": str(first.get("TRACKING NUMBER", "")),
+            "TERMS": str(first.get("TERMS", "")),
+            "TOTAL QTY": f"{total_qty:.2f}",
             "TOTAL CBM": f"{total_cbm:.2f}",
-            "TOTAL CHARGES_SUM": f"{total:.2f}"
+            "TOTAL CHARGES_SUM": f"{total:.2f}",
+            "FLAT_RATE_APPLIED": "Yes" if total_cbm < 0.05 else "No"
         })
     return pd.DataFrame(consolidated)
 
@@ -176,52 +194,108 @@ def create_download_link(file_path: str, label: str) -> str:
         b64 = base64.b64encode(f.read()).decode()
     return f'<a href="data:application/octet-stream;base64,{b64}" download="{os.path.basename(file_path)}">{label}</a>'
 
+def display_customer_markdowns(df: pd.DataFrame):
+    """Display formatted markdown for each customer"""
+    st.header("📋 Customer Summaries")
+    for customer in df["MARK"].unique():
+        with st.expander(f"📌 {customer}"):
+            customer_data = df[df["MARK"] == customer].iloc[0]
+            st.markdown(f"""
+            **Customer:** {customer}  
+            **Contact:** {customer_data.get('CONTACT NUMBER', 'N/A')}  
+            **Total Items:** {customer_data.get('TOTAL QTY', 'N/A')}  
+            **Total CBM:** {customer_data.get('TOTAL CBM', 'N/A')}  
+            **Total Charges:** ${customer_data.get('TOTAL CHARGES_SUM', 'N/A')}  
+            **Tracking Number:** {customer_data.get('TRACKING NUMBER', 'N/A')}  
+            **Terms:** {customer_data.get('TERMS', 'N/A')}
+            """)
+
 def main():
     st.title("📄 Invoice Generation System")
     
-    # Initialize session state
+    # Initialize session state for persistent values
+    if 'global_defaults' not in st.session_state:
+        st.session_state.global_defaults = {
+            'PER_CHARGES': None,
+            'WEIGHT_RATE': None,
+            'PARKING_CHARGES': None
+        }
     if 'consolidated_df' not in st.session_state:
         st.session_state.consolidated_df = None
     
+    # Sidebar functions
+    st.sidebar.header("⚙️ Quick Actions")
+    st.sidebar.markdown("[📝 Sample Excel Template](#)")
+    
+    if st.sidebar.button("🔄 Clear All Data"):
+        st.session_state.consolidated_df = None
+        st.session_state.global_defaults = {
+            'PER_CHARGES': None,
+            'WEIGHT_RATE': None,
+            'PARKING_CHARGES': None
+        }
+        st.experimental_rerun()
+    
+    if st.sidebar.button("ℹ️ Help"):
+        st.sidebar.info("""
+        **Instructions:**
+        1. Upload Excel file with customer data
+        2. Set global defaults if needed
+        3. Generate individual or all invoices
+        4. Download the generated PDFs
+        """)
+    
     # File Upload
-    uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx", "xls"])
+    uploaded_file = st.file_uploader("📤 Upload Excel File", type=["xlsx", "xls"])
     
     if uploaded_file:
         try:
             df = pd.read_excel(uploaded_file)
             
             # Initialize missing columns with defaults
-            for col in ["PARKING CHARGES", "PER CHARGES", "Weight Rate"]:
+            for col in ["PARKING CHARGES", "PER CHARGES", "Weight Rate", 
+                       "TRACKING NUMBER", "TERMS"]:
                 if col not in df.columns:
-                    default_value = 0.0 if col != "Weight Rate" else 1.0
+                    default_value = 0.0 if col in ["PARKING CHARGES", "PER CHARGES", "Weight Rate"] else ""
                     df[col] = default_value
             
-            # Global Settings UI
+            # Global Settings UI with persistent values
             st.header("⚙️ Global Settings")
             col1, col2, col3 = st.columns(3)
             with col1:
+                current_per_charge = float(df["PER CHARGES"].iloc[0])
                 default_per_charge = st.number_input(
                     "Default Per Charge ($/CBM)",
-                    value=float(df["PER CHARGES"].iloc[0]),
+                    value=st.session_state.global_defaults['PER_CHARGES'] or current_per_charge,
                     min_value=0.0,
-                    step=0.1
+                    step=0.1,
+                    key="global_per_charge"
                 )
             with col2:
+                current_weight_rate = float(df["Weight Rate"].iloc[0])
                 default_weight_rate = st.number_input(
                     "Default Weight Rate (kg/CBM)",
-                    value=float(df["Weight Rate"].iloc[0]),
+                    value=st.session_state.global_defaults['WEIGHT_RATE'] or current_weight_rate,
                     min_value=0.1,
-                    step=0.1
+                    step=0.1,
+                    key="global_weight_rate"
                 )
             with col3:
+                current_parking = float(df["PARKING CHARGES"].iloc[0])
                 default_parking = st.number_input(
                     "Default Parking Charge ($)",
-                    value=float(df["PARKING CHARGES"].iloc[0]),
+                    value=st.session_state.global_defaults['PARKING_CHARGES'] or current_parking,
                     min_value=0.0,
-                    step=0.1
+                    step=0.1,
+                    key="global_parking"
                 )
             
             if st.button("💾 Apply Global Settings", key="apply_global"):
+                st.session_state.global_defaults = {
+                    'PER_CHARGES': default_per_charge,
+                    'WEIGHT_RATE': default_weight_rate,
+                    'PARKING_CHARGES': default_parking
+                }
                 df["PER CHARGES"] = default_per_charge
                 df["Weight Rate"] = default_weight_rate
                 df["PARKING CHARGES"] = default_parking
@@ -230,6 +304,9 @@ def main():
             # Process data
             df["CBM"] = df[["MEAS.(CBM)", "WEIGHT(KG)"]].max(axis=1)
             st.session_state.consolidated_df = consolidate_data(df)
+            
+            # Display customer markdowns
+            display_customer_markdowns(st.session_state.consolidated_df)
             
             st.header("📊 Processed Data")
             st.dataframe(st.session_state.consolidated_df)
