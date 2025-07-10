@@ -1,0 +1,7 @@
+libreoffice
+libreoffice-writer
+libreoffice-calc
+libreoffice-draw
+libreoffice-impress
+libreoffice-base
+fonts-liberation
