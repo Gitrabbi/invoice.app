@@ -4,5 +4,4 @@ python-docx
 pypdf
 pdf2docx
 openpyxl
-reportlab
-fpdf
+unoconv
