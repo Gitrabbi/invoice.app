@@ -73,20 +73,26 @@ def generate_pdf_from_template(
             "INVOICE NUMBER": str(invoice_number)
         })
 
-        # Replace placeholders
+        # Replace placeholders in paragraphs
         for paragraph in doc.paragraphs:
             for key, value in formatted_data.items():
-                for ph in [f"{{{{{key}}}}", f"{{{{{key}.}}}}"]:
+                for ph in [f"{{{{{key}}}}}", f"{{{{{key}.}}}}"]:
                     if ph in paragraph.text:
                         paragraph.text = paragraph.text.replace(ph, value)
+                        for run in paragraph.runs:
+                            run.font.size = Pt(8)
 
+        # Replace placeholders in tables
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     for key, value in formatted_data.items():
-                        for ph in [f"{{{{{key}}}}", f"{{{{{key}.}}}}"]:
+                        for ph in [f"{{{{{key}}}}}", f"{{{{{key}.}}}}"]:
                             if ph in cell.text:
                                 cell.text = cell.text.replace(ph, value)
+                                for paragraph in cell.paragraphs:
+                                    for run in paragraph.runs:
+                                        run.font.size = Pt(8)
 
         # Generate unique filename
         customer = sanitize_filename(formatted_data.get("MARK", "Customer"))
