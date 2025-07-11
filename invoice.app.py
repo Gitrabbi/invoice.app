@@ -319,103 +319,6 @@ def display_customer_markdowns(df: pd.DataFrame):
                 edited_df.loc[mask, "PER CHARGES"] = float(new_per_charges)
                 edited_df.loc[mask, "PARKING CHARGES"] = float(new_parking)
                 edited_df.loc[mask, "Weight Rate"] = float(new_weight_rate)
-def display_customer_markdowns(df: pd.DataFrame):
-    """Display formatted markdown for each customer with editing capability"""
-    st.header("📋 Customer Summaries & Editing")
-    
-    # Create a copy of the dataframe to work with
-    edited_df = df.copy()
-    
-    for idx, customer in enumerate(df["MARK"].unique()):
-        with st.expander(f"📌 {customer}", expanded=False):
-            customer_data = df[df["MARK"] == customer].iloc[0]
-            
-            # Convert numeric fields to float
-            try:
-                per_charges = float(customer_data['PER CHARGES'])
-                parking_charges = float(customer_data['PARKING CHARGES'])
-                total_cbm = float(customer_data['TOTAL CBM'])
-                weight_rate = float(customer_data['Weight Rate']) if 'Weight Rate' in customer_data else 1.0
-            except (ValueError, TypeError):
-                per_charges = 0.0
-                parking_charges = 0.0
-                total_cbm = 0.0
-                weight_rate = 1.0
-            
-            # Display customer info
-            st.markdown(f"""
-            **Customer:** {customer}  
-            **Contact:** {customer_data.get('CONTACT NUMBER', 'N/A')}  
-            **Total Items:** {customer_data.get('TOTAL QTY', 'N/A')}  
-            **Total CBM:** {customer_data.get('TOTAL CBM', 'N/A')}  
-            **Weight Rate:** {weight_rate:.2f}  
-            **Total Charges:** ${customer_data.get('TOTAL CHARGES_SUM', 'N/A')}  
-            **Tracking Number:** {customer_data.get('TRACKING NUMBER', 'N/A')}  
-            **Terms:** {customer_data.get('TERMS', 'N/A')}
-            **Flat Rate Applied:** {customer_data.get('FLAT_RATE_APPLIED', 'No')}
-            """)
-            
-            # Add editing capability
-            st.subheader("✏️ Edit Customer Data")
-            cols = st.columns(4)
-            
-            with cols[0]:
-                new_per_charges = st.number_input(
-                    "Per Charges ($/CBM)",
-                    value=per_charges,
-                    min_value=0.0,
-                    step=0.1,
-                    key=f"per_charges_{idx}"
-                )
-            
-            with cols[1]:
-                new_parking = st.number_input(
-                    "Parking Charges ($)",
-                    value=parking_charges,
-                    min_value=0.0,
-                    step=0.1,
-                    key=f"parking_{idx}"
-                )
-            
-            with cols[2]:
-                new_weight_rate = st.number_input(
-                    "Weight Rate (kg/CBM)",
-                    value=weight_rate,
-                    min_value=0.1,
-                    step=0.1,
-                    key=f"weight_rate_{idx}"
-                )
-            
-            with cols[3]:
-                new_terms = st.text_input(
-                    "Terms",
-                    value=str(customer_data.get('TERMS', '')),
-                    key=f"terms_{idx}"
-                )
-            
-            # Additional editable fields
-            cols2 = st.columns(2)
-            with cols2[0]:
-                new_tracking = st.text_input(
-                    "Tracking Number",
-                    value=str(customer_data.get('TRACKING NUMBER', '')),
-                    key=f"tracking_{idx}"
-                )
-            
-            with cols2[1]:
-                new_contact = st.text_input(
-                    "Contact Number",
-                    value=str(customer_data.get('CONTACT NUMBER', '')),
-                    key=f"contact_{idx}"
-                )
-            
-            if st.button(f"💾 Save Changes for {customer}", key=f"save_{idx}"):
-                # Update the dataframe with edited values
-                mask = edited_df["MARK"] == customer
-                
-                edited_df.loc[mask, "PER CHARGES"] = float(new_per_charges)
-                edited_df.loc[mask, "PARKING CHARGES"] = float(new_parking)
-                edited_df.loc[mask, "Weight Rate"] = float(new_weight_rate)
                 edited_df.loc[mask, "TERMS"] = new_terms
                 edited_df.loc[mask, "TRACKING NUMBER"] = new_tracking
                 edited_df.loc[mask, "CONTACT NUMBER"] = new_contact
@@ -491,187 +394,185 @@ def main():
         3. Generate individual or all invoices
         4. Download the generated PDFs
         """)
-# File Upload
-uploaded_file = st.file_uploader("📤 Upload Excel File", type=["xlsx", "xls"])
-if uploaded_file:
-    try:
-        df = pd.read_excel(uploaded_file)
-        
-        # Initialize missing columns with session state defaults if they exist
-        per_charge_default = (
-            st.session_state.global_defaults['PER_CHARGES'] 
-            if st.session_state.global_defaults.get('applied', False)
-            else 0.0
-        )
-        parking_default = (
-            st.session_state.global_defaults['PARKING_CHARGES']
-            if st.session_state.global_defaults.get('applied', False)
-            else 0.0
-        )
-        weight_rate_default = (
-            st.session_state.global_defaults['WEIGHT_RATE']
-            if st.session_state.global_defaults.get('applied', False)
-            else 1.0
-        )
-        
-        # Initialize missing columns
-        for col in ["PARKING CHARGES", "PER CHARGES", "Weight Rate", 
-                   "TRACKING NUMBER", "TERMS"]:
-            if col not in df.columns:
-                default_value = 0.0 if col in ["PARKING CHARGES", "PER CHARGES"] else (1.0 if col == "Weight Rate" else "")
-                df[col] = default_value
-        
-        # Handle zero weight rates
-        if "Weight Rate" in df.columns:
-            df["Weight Rate"] = df["Weight Rate"].replace(0, 1.0)
+
+    # File Upload
+    uploaded_file = st.file_uploader("📤 Upload Excel File", type=["xlsx", "xls"])
+    if uploaded_file:
+        try:
+            df = pd.read_excel(uploaded_file)
             
-    except Exception as e:
-        st.error(f"Error processing file: {e}")
-            
-            # Global Settings UI
-            st.header("⚙️ Global Settings")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                current_per_charge = float(df["PER CHARGES"].iloc[0])
-                default_per_charge = st.number_input(
-                    "Default Per Charge ($/CBM)",
-                    value=st.session_state.global_defaults['PER_CHARGES'] or current_per_charge,
-                    min_value=0.0,
-                    step=0.1,
-                    key="global_per_charge"
-                )
-            with col2:
-                current_weight_rate = float(df["Weight Rate"].iloc[0])
-                default_weight_rate = st.number_input(
-                    "Default Weight Rate (kg/CBM)",
-                    value=st.session_state.global_defaults['WEIGHT_RATE'] or current_weight_rate,
-                    min_value=0.1,
-                    step=0.1,
-                    key="global_weight_rate"
-                )
-            with col3:
-                current_parking = float(df["PARKING CHARGES"].iloc[0])
-                default_parking = st.number_input(
-                    "Default Parking Charge ($)",
-                    value=st.session_state.global_defaults['PARKING_CHARGES'] or current_parking,
-                    min_value=0.0,
-                    step=0.1,
-                    key="global_parking"
-                )
-            
-            if st.button("💾 Apply Global Settings", key="apply_global"):
-                st.session_state.global_defaults = {
-                    'PER_CHARGES': default_per_charge,
-                    'WEIGHT_RATE': default_weight_rate,
-                    'PARKING_CHARGES': default_parking,
-                    'applied': True
-                }
-                st.success("Global settings applied to all customers!")
-            
-            # Process data with original calculation logic
-            df["Weight CBM"] = df["WEIGHT(KG)"] / df["Weight Rate"]
-            df["CBM"] = df[["MEAS.(CBM)", "Weight CBM"]].max(axis=1)
-            st.session_state.consolidated_df = consolidate_data(df)
-            
-            # Display customer markdowns
-            display_customer_markdowns(st.session_state.consolidated_df)
-            
-            st.header("📊 Processed Data")
-            st.dataframe(st.session_state.consolidated_df)
-            
-            # Invoice Generation
-            st.header("🖨️ Invoice Generation")
-            start_num = st.number_input(
-                "Starting Invoice Number", 
-                min_value=1, 
-                value=1,
-                key="invoice_start"
+            # Initialize missing columns with session state defaults if they exist
+            per_charge_default = (
+                st.session_state.global_defaults['PER_CHARGES'] 
+                if st.session_state.global_defaults.get('applied', False)
+                else 0.0
+            )
+            parking_default = (
+                st.session_state.global_defaults['PARKING_CHARGES']
+                if st.session_state.global_defaults.get('applied', False)
+                else 0.0
+            )
+            weight_rate_default = (
+                st.session_state.global_defaults['WEIGHT_RATE']
+                if st.session_state.global_defaults.get('applied', False)
+                else 1.0
             )
             
-            if st.button("🔄 Generate All Invoices", key="generate_all"):
-                if os.path.exists(OUTPUT_FOLDER):
-                    shutil.rmtree(OUTPUT_FOLDER)
-                os.makedirs(OUTPUT_FOLDER)
-                
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                for i, (_, row) in enumerate(st.session_state.consolidated_df.iterrows()):
-                    status_text.text(f"Processing {i+1}/{len(st.session_state.consolidated_df)}: {row['MARK']}")
-                    progress_bar.progress((i + 1) / len(st.session_state.consolidated_df))
-                    
-                    pdf_path = generate_pdf_from_template(
-                        TEMPLATE_PATH,
-                        row.to_dict(),
-                        OUTPUT_FOLDER,
-                        start_num + i
-                    )
-                    
-                    if pdf_path:
-                        update_notification_sheet(
-                            OUTPUT_FOLDER,
-                            os.path.basename(pdf_path),
-                            row["MARK"],
-                            start_num + i,
-                            row["CONTACT NUMBER"],
-                            row["TOTAL CHARGES_SUM"]
-                        )
-                
-                # Create ZIP archive
-                zip_path = os.path.join(OUTPUT_FOLDER, "invoices.zip")
-                with zipfile.ZipFile(zip_path, 'w') as zipf:
-                    for file in os.listdir(OUTPUT_FOLDER):
-                        if file.endswith('.pdf'):
-                            zipf.write(
-                                os.path.join(OUTPUT_FOLDER, file), 
-                                file
-                            )
-                
-                st.markdown(
-                    create_download_link(zip_path, "📥 Download All Invoices"),
-                    unsafe_allow_html=True
-                )
-                st.success("✅ All invoices generated successfully!")
+            # Initialize missing columns
+            for col in ["PARKING CHARGES", "PER CHARGES", "Weight Rate", 
+                       "TRACKING NUMBER", "TERMS"]:
+                if col not in df.columns:
+                    default_value = 0.0 if col in ["PARKING CHARGES", "PER CHARGES"] else (1.0 if col == "Weight Rate" else "")
+                    df[col] = default_value
             
-            # Single Invoice Generation
-            st.subheader("🖨️ Single Invoice")
-            if st.session_state.consolidated_df is not None:
-                customer = st.selectbox(
-                    "Select Customer",
-                    options=st.session_state.consolidated_df["MARK"].unique(),
-                    key="customer_select"
-                )
-                single_num = st.number_input(
-                    "Invoice Number", 
-                    min_value=1, 
-                    value=start_num,
-                    key="single_invoice_num"
+            # Handle zero weight rates
+            if "Weight Rate" in df.columns:
+                df["Weight Rate"] = df["Weight Rate"].replace(0, 1.0)
+                
+        except Exception as e:
+            st.error(f"Error processing file: {e}")
+            
+        # Global Settings UI
+        st.header("⚙️ Global Settings")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            current_per_charge = float(df["PER CHARGES"].iloc[0])
+            default_per_charge = st.number_input(
+                "Default Per Charge ($/CBM)",
+                value=st.session_state.global_defaults['PER_CHARGES'] or current_per_charge,
+                min_value=0.0,
+                step=0.1,
+                key="global_per_charge"
+            )
+        with col2:
+            current_weight_rate = float(df["Weight Rate"].iloc[0])
+            default_weight_rate = st.number_input(
+                "Default Weight Rate (kg/CBM)",
+                value=st.session_state.global_defaults['WEIGHT_RATE'] or current_weight_rate,
+                min_value=0.1,
+                step=0.1,
+                key="global_weight_rate"
+            )
+        with col3:
+            current_parking = float(df["PARKING CHARGES"].iloc[0])
+            default_parking = st.number_input(
+                "Default Parking Charge ($)",
+                value=st.session_state.global_defaults['PARKING_CHARGES'] or current_parking,
+                min_value=0.0,
+                step=0.1,
+                key="global_parking"
+            )
+        
+        if st.button("💾 Apply Global Settings", key="apply_global"):
+            st.session_state.global_defaults = {
+                'PER_CHARGES': default_per_charge,
+                'WEIGHT_RATE': default_weight_rate,
+                'PARKING_CHARGES': default_parking,
+                'applied': True
+            }
+            st.success("Global settings applied to all customers!")
+        
+        # Process data with original calculation logic
+        df["Weight CBM"] = df["WEIGHT(KG)"] / df["Weight Rate"]
+        df["CBM"] = df[["MEAS.(CBM)", "Weight CBM"]].max(axis=1)
+        st.session_state.consolidated_df = consolidate_data(df)
+        
+        # Display customer markdowns
+        display_customer_markdowns(st.session_state.consolidated_df)
+        
+        st.header("📊 Processed Data")
+        st.dataframe(st.session_state.consolidated_df)
+        
+        # Invoice Generation
+        st.header("🖨️ Invoice Generation")
+        start_num = st.number_input(
+            "Starting Invoice Number", 
+            min_value=1, 
+            value=1,
+            key="invoice_start"
+        )
+        
+        if st.button("🔄 Generate All Invoices", key="generate_all"):
+            if os.path.exists(OUTPUT_FOLDER):
+                shutil.rmtree(OUTPUT_FOLDER)
+            os.makedirs(OUTPUT_FOLDER)
+            
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            for i, (_, row) in enumerate(st.session_state.consolidated_df.iterrows()):
+                status_text.text(f"Processing {i+1}/{len(st.session_state.consolidated_df)}: {row['MARK']}")
+                progress_bar.progress((i + 1) / len(st.session_state.consolidated_df))
+                
+                pdf_path = generate_pdf_from_template(
+                    TEMPLATE_PATH,
+                    row.to_dict(),
+                    OUTPUT_FOLDER,
+                    start_num + i
                 )
                 
-                if st.button("🖨️ Generate Selected Invoice", key="generate_single"):
-                    row = st.session_state.consolidated_df[
-                        st.session_state.consolidated_df["MARK"] == customer
-                    ].iloc[0]
-                    
-                    pdf_path = generate_pdf_from_template(
-                        TEMPLATE_PATH,
-                        row.to_dict(),
+                if pdf_path:
+                    update_notification_sheet(
                         OUTPUT_FOLDER,
-                        single_num
+                        os.path.basename(pdf_path),
+                        row["MARK"],
+                        start_num + i,
+                        row["CONTACT NUMBER"],
+                        row["TOTAL CHARGES_SUM"]
                     )
-                    
-                    if pdf_path:
-                        with open(pdf_path, "rb") as f:
-                            st.download_button(
-                                "📥 Download Invoice",
-                                f,
-                                file_name=os.path.basename(pdf_path),
-                                mime="application/pdf"
-                            )
-                        st.success(f"✅ Invoice #{single_num} generated for {customer}!")
+            
+            # Create ZIP archive
+            zip_path = os.path.join(OUTPUT_FOLDER, "invoices.zip")
+            with zipfile.ZipFile(zip_path, 'w') as zipf:
+                for file in os.listdir(OUTPUT_FOLDER):
+                    if file.endswith('.pdf'):
+                        zipf.write(
+                            os.path.join(OUTPUT_FOLDER, file), 
+                            file
+                        )
+            
+            st.markdown(
+                create_download_link(zip_path, "📥 Download All Invoices"),
+                unsafe_allow_html=True
+            )
+            st.success("✅ All invoices generated successfully!")
         
-        except Exception as e:
-            st.error(f"❌ Processing error: {str(e)}")
+        # Single Invoice Generation
+        st.subheader("🖨️ Single Invoice")
+        if st.session_state.consolidated_df is not None:
+            customer = st.selectbox(
+                "Select Customer",
+                options=st.session_state.consolidated_df["MARK"].unique(),
+                key="customer_select"
+            )
+            single_num = st.number_input(
+                "Invoice Number", 
+                min_value=1, 
+                value=start_num,
+                key="single_invoice_num"
+            )
+            
+            if st.button("🖨️ Generate Selected Invoice", key="generate_single"):
+                row = st.session_state.consolidated_df[
+                    st.session_state.consolidated_df["MARK"] == customer
+                ].iloc[0]
+                
+                pdf_path = generate_pdf_from_template(
+                    TEMPLATE_PATH,
+                    row.to_dict(),
+                    OUTPUT_FOLDER,
+                    single_num
+                )
+                
+                if pdf_path:
+                    with open(pdf_path, "rb") as f:
+                        st.download_button(
+                            "📥 Download Invoice",
+                            f,
+                            file_name=os.path.basename(pdf_path),
+                            mime="application/pdf"
+                        )
+                    st.success(f"✅ Invoice #{single_num} generated for {customer}!")
 
 if __name__ == "__main__":
     main()
