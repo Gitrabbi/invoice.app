@@ -494,30 +494,29 @@ def main():
     
     # File Upload
     uploaded_file = st.file_uploader("📤 Upload Excel File", type=["xlsx", "xls"])
-    
     if uploaded_file:
-        try:
-            df = pd.read_excel(uploaded_file)
-            
-            # Initialize missing columns with session state defaults if they exist
-            per_charge_default = (
-                st.session_state.global_defaults['PER_CHARGES'] 
-                if st.session_state.global_defaults.get('applied', False)
-                else 0.0
-            )
-            parking_default = (
-                st.session_state.global_defaults['PARKING_CHARGES']
-                if st.session_state.global_defaults.get('applied', False)
-                else 0.0
-            )
-            weight_rate_default = (
-                st.session_state.global_defaults['WEIGHT_RATE']
-                if st.session_state.global_defaults.get('applied', False)
-                else 1.0
-            )
-            # Initialize missing columns
-            for col in ["PARKING CHARGES", "PER CHARGES", "Weight Rate", 
-                   "TRACKING NUMBER", "TERMS"]:
+    try:
+        df = pd.read_excel(uploaded_file)
+        
+        # Initialize missing columns with session state defaults if they exist
+        per_charge_default = (
+            st.session_state.global_defaults['PER_CHARGES'] 
+            if st.session_state.global_defaults.get('applied', False)
+            else 0.0
+        )
+        parking_default = (
+            st.session_state.global_defaults['PARKING_CHARGES']
+            if st.session_state.global_defaults.get('applied', False)
+            else 0.0
+        )
+        weight_rate_default = (
+            st.session_state.global_defaults['WEIGHT_RATE']
+            if st.session_state.global_defaults.get('applied', False)
+            else 1.0
+        )
+        # Initialize missing columns
+        for col in ["PARKING CHARGES", "PER CHARGES", "Weight Rate", 
+               "TRACKING NUMBER", "TERMS"]:
             if col not in df.columns:
                 default_value = 0.0 if col in ["PARKING CHARGES", "PER CHARGES"] else (1.0 if col == "Weight Rate" else "")
                 df[col] = default_value
