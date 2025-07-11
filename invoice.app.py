@@ -172,18 +172,20 @@ def consolidate_data(df: pd.DataFrame) -> pd.DataFrame:
             else float(group["Weight Rate"].iloc[0]) if "Weight Rate" in group.columns else 1.0
         )
         
-        # Original calculation logic
-        total_qty = group["QTY"].sum(skipna=True)
-        total_cbm = group["CBM"].sum(skipna=True)
-        
-        # Calculate charges based on original logic
+                # Calculate CBM for each row (weight-based vs. measured)
+        group["Weight CBM"] = group["WEIGHT(KG)"] / weight_rate
+        group["Actual CBM"] = group[["MEAS.(CBM)", "Weight CBM"]].max(axis=1)
+        total_cbm = group["Actual CBM"].sum()
+
+        # Calculate charges
         if total_cbm < 0.05:
-            calculated_charges = 10.00
-            rate_applied = 10.00  # Flat rate
+            calculated_charges = 10.00  # Flat rate
+            rate_applied = 10.00
         else:
+            calculated_charges = (group["Actual CBM"] * per_charge).sum()
             rate_applied = per_charge
-            calculated_charges = (group["CBM"] * per_charge).sum(skipna=True)
-        
+
+        total_charges = calculated_charges + parking_charges
         total_charges = calculated_charges + parking_charges
         first_row = group.iloc[0]
         
