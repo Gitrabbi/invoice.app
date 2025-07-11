@@ -491,10 +491,9 @@ def main():
         3. Generate individual or all invoices
         4. Download the generated PDFs
         """)
-    
-    # File Upload
-    uploaded_file = st.file_uploader("📤 Upload Excel File", type=["xlsx", "xls"])
-    if uploaded_file:
+# File Upload
+uploaded_file = st.file_uploader("📤 Upload Excel File", type=["xlsx", "xls"])
+if uploaded_file:
     try:
         df = pd.read_excel(uploaded_file)
         
@@ -514,9 +513,10 @@ def main():
             if st.session_state.global_defaults.get('applied', False)
             else 1.0
         )
+        
         # Initialize missing columns
         for col in ["PARKING CHARGES", "PER CHARGES", "Weight Rate", 
-               "TRACKING NUMBER", "TERMS"]:
+                   "TRACKING NUMBER", "TERMS"]:
             if col not in df.columns:
                 default_value = 0.0 if col in ["PARKING CHARGES", "PER CHARGES"] else (1.0 if col == "Weight Rate" else "")
                 df[col] = default_value
@@ -524,9 +524,9 @@ def main():
         # Handle zero weight rates
         if "Weight Rate" in df.columns:
             df["Weight Rate"] = df["Weight Rate"].replace(0, 1.0)
-            # Handle zero weight rates
-            if "Weight Rate" in df.columns:
-                df["Weight Rate"] = df["Weight Rate"].replace(0, 1.0)
+            
+    except Exception as e:
+        st.error(f"Error processing file: {e}")
             
             # Global Settings UI
             st.header("⚙️ Global Settings")
