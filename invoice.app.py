@@ -319,23 +319,121 @@ def display_customer_markdowns(df: pd.DataFrame):
                 edited_df.loc[mask, "PER CHARGES"] = float(new_per_charges)
                 edited_df.loc[mask, "PARKING CHARGES"] = float(new_parking)
                 edited_df.loc[mask, "Weight Rate"] = float(new_weight_rate)
+def display_customer_markdowns(df: pd.DataFrame):
+    """Display formatted markdown for each customer with editing capability"""
+    st.header("📋 Customer Summaries & Editing")
+    
+    # Create a copy of the dataframe to work with
+    edited_df = df.copy()
+    
+    for idx, customer in enumerate(df["MARK"].unique()):
+        with st.expander(f"📌 {customer}", expanded=False):
+            customer_data = df[df["MARK"] == customer].iloc[0]
+            
+            # Convert numeric fields to float
+            try:
+                per_charges = float(customer_data['PER CHARGES'])
+                parking_charges = float(customer_data['PARKING CHARGES'])
+                total_cbm = float(customer_data['TOTAL CBM'])
+                weight_rate = float(customer_data['Weight Rate']) if 'Weight Rate' in customer_data else 1.0
+            except (ValueError, TypeError):
+                per_charges = 0.0
+                parking_charges = 0.0
+                total_cbm = 0.0
+                weight_rate = 1.0
+            
+            # Display customer info
+            st.markdown(f"""
+            **Customer:** {customer}  
+            **Contact:** {customer_data.get('CONTACT NUMBER', 'N/A')}  
+            **Total Items:** {customer_data.get('TOTAL QTY', 'N/A')}  
+            **Total CBM:** {customer_data.get('TOTAL CBM', 'N/A')}  
+            **Weight Rate:** {weight_rate:.2f}  
+            **Total Charges:** ${customer_data.get('TOTAL CHARGES_SUM', 'N/A')}  
+            **Tracking Number:** {customer_data.get('TRACKING NUMBER', 'N/A')}  
+            **Terms:** {customer_data.get('TERMS', 'N/A')}
+            **Flat Rate Applied:** {customer_data.get('FLAT_RATE_APPLIED', 'No')}
+            """)
+            
+            # Add editing capability
+            st.subheader("✏️ Edit Customer Data")
+            cols = st.columns(4)
+            
+            with cols[0]:
+                new_per_charges = st.number_input(
+                    "Per Charges ($/CBM)",
+                    value=per_charges,
+                    min_value=0.0,
+                    step=0.1,
+                    key=f"per_charges_{idx}"
+                )
+            
+            with cols[1]:
+                new_parking = st.number_input(
+                    "Parking Charges ($)",
+                    value=parking_charges,
+                    min_value=0.0,
+                    step=0.1,
+                    key=f"parking_{idx}"
+                )
+            
+            with cols[2]:
+                new_weight_rate = st.number_input(
+                    "Weight Rate (kg/CBM)",
+                    value=weight_rate,
+                    min_value=0.1,
+                    step=0.1,
+                    key=f"weight_rate_{idx}"
+                )
+            
+            with cols[3]:
+                new_terms = st.text_input(
+                    "Terms",
+                    value=str(customer_data.get('TERMS', '')),
+                    key=f"terms_{idx}"
+                )
+            
+            # Additional editable fields
+            cols2 = st.columns(2)
+            with cols2[0]:
+                new_tracking = st.text_input(
+                    "Tracking Number",
+                    value=str(customer_data.get('TRACKING NUMBER', '')),
+                    key=f"tracking_{idx}"
+                )
+            
+            with cols2[1]:
+                new_contact = st.text_input(
+                    "Contact Number",
+                    value=str(customer_data.get('CONTACT NUMBER', '')),
+                    key=f"contact_{idx}"
+                )
+            
+            if st.button(f"💾 Save Changes for {customer}", key=f"save_{idx}"):
+                # Update the dataframe with edited values
+                mask = edited_df["MARK"] == customer
+                
+                edited_df.loc[mask, "PER CHARGES"] = float(new_per_charges)
+                edited_df.loc[mask, "PARKING CHARGES"] = float(new_parking)
+                edited_df.loc[mask, "Weight Rate"] = float(new_weight_rate)
                 edited_df.loc[mask, "TERMS"] = new_terms
                 edited_df.loc[mask, "TRACKING NUMBER"] = new_tracking
                 edited_df.loc[mask, "CONTACT NUMBER"] = new_contact
                 
-                # Recalculate CBM based on new weight rate
+                # Recalculate CBM and charges
                 try:
-                    weight_kg = float(edited_df.loc[mask, "WEIGHT(KG)"].values[0])
-                    meas_cbm = float(edited_df.loc[mask, "MEAS.(CBM)"].values[0])
-                    weight_cbm = weight_kg / float(new_weight_rate)
-                    current_cbm = max(meas_cbm, weight_cbm)
-                    edited_df.loc[mask, "CBM"] = current_cbm
-                    edited_df.loc[mask, "TOTAL CBM"] = f"{current_cbm:.2f}"
-                except (ValueError, TypeError, IndexError) as e:
-                    st.error(f"Error recalculating CBM: {str(e)}")
-                    current_cbm = 0.0
+                    if 'WEIGHT(KG)' in edited_df.columns and 'MEAS.(CBM)' in edited_df.columns:
+                        weight_kg = float(edited_df.loc[mask, "WEIGHT(KG)"].values[0])
+                        meas_cbm = float(edited_df.loc[mask, "MEAS.(CBM)"].values[0])
+                        weight_cbm = weight_kg / float(new_weight_rate)
+                        current_cbm = max(meas_cbm, weight_cbm)
+                        edited_df.loc[mask, "CBM"] = current_cbm
+                        edited_df.loc[mask, "TOTAL CBM"] = f"{current_cbm:.2f}"
+                except Exception as e:
+                    st.error(f"Recalculation error: {str(e)}")
+                    current_cbm = float(edited_df.loc[mask, "CBM"].values[0])
                 
-                # Recalculate charges
+                # Calculate charges
                 if current_cbm < 0.05:
                     calculated_charges = 10.00
                 else:
@@ -343,7 +441,7 @@ def display_customer_markdowns(df: pd.DataFrame):
                 
                 total_charges = calculated_charges + float(new_parking)
                 
-                # Update all calculated fields
+                # Update calculated fields
                 edited_df.loc[mask, "TOTAL CHARGES_SUM"] = total_charges
                 edited_df.loc[mask, "TOTAL CHARGES"] = f"{total_charges:.2f}"
                 edited_df.loc[mask, "FLAT_RATE_APPLIED"] = "Yes" if current_cbm < 0.05 else "No"
@@ -417,20 +515,16 @@ def main():
                 if st.session_state.global_defaults.get('applied', False)
                 else 1.0
             )
-            
             # Initialize missing columns
             for col in ["PARKING CHARGES", "PER CHARGES", "Weight Rate", 
-                       "TRACKING NUMBER", "TERMS"]:
-                if col not in df.columns:
-                    if col == "PARKING CHARGES":
-                        df[col] = parking_default
-                    elif col == "PER CHARGES":
-                        df[col] = per_charge_default
-                    elif col == "Weight Rate":
-                        df[col] = weight_rate_default
-                    else:
-                        df[col] = ""
-            
+                   "TRACKING NUMBER", "TERMS"]:
+            if col not in df.columns:
+                default_value = 0.0 if col in ["PARKING CHARGES", "PER CHARGES"] else (1.0 if col == "Weight Rate" else "")
+                df[col] = default_value
+        
+        # Handle zero weight rates
+        if "Weight Rate" in df.columns:
+            df["Weight Rate"] = df["Weight Rate"].replace(0, 1.0)
             # Handle zero weight rates
             if "Weight Rate" in df.columns:
                 df["Weight Rate"] = df["Weight Rate"].replace(0, 1.0)
