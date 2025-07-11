@@ -211,7 +211,7 @@ def create_download_link(file_path: str, label: str) -> str:
     with open(file_path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
     return f'<a href="data:application/octet-stream;base64,{b64}" download="{os.path.basename(file_path)}">{label}</a>'
-
+    
 def display_customer_markdowns(df: pd.DataFrame):
     """Display formatted markdown for each customer with editing capability"""
     st.header("📋 Customer Summaries & Editing")
