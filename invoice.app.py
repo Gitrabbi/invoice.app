@@ -166,6 +166,11 @@ def consolidate_data(df: pd.DataFrame) -> pd.DataFrame:
             if st.session_state.global_defaults.get('applied', False)
             else float(group["PARKING CHARGES"].iloc[0])
         )
+        weight_rate = (
+            st.session_state.global_defaults['WEIGHT_RATE']
+            if st.session_state.global_defaults.get('applied', False)
+            else float(group["Weight Rate"].iloc[0]) if "Weight Rate" in group.columns else 1.0
+        )
         
         # Original calculation logic
         total_qty = group["QTY"].sum(skipna=True)
@@ -190,8 +195,9 @@ def consolidate_data(df: pd.DataFrame) -> pd.DataFrame:
         consolidated.append({
             **joined,
             "PARKING CHARGES": f"{parking_charges:.2f}",
-            "PER CHARGES": f"{rate_applied:.2f}",  # This shows the actual rate applied
-            "RATE": f"{rate_applied:.2f}",  # Additional field for display
+            "PER CHARGES": f"{rate_applied:.2f}",
+            "RATE": f"{rate_applied:.2f}",
+            "Weight Rate": f"{weight_rate:.2f}",
             "TOTAL CHARGES": f"{total_charges:.2f}",
             "MARK": customer,
             "CONTACT NUMBER": str(first_row.get("CONTACT NUMBER", "")),
@@ -202,9 +208,10 @@ def consolidate_data(df: pd.DataFrame) -> pd.DataFrame:
             "TOTAL CBM": f"{total_cbm:.2f}",
             "TOTAL CHARGES_SUM": f"{total_charges:.2f}",
             "FLAT_RATE_APPLIED": "Yes" if total_cbm < 0.05 else "No",
-            "CALCULATED_CHARGES": calculated_charges  # For verification
+            "CALCULATED_CHARGES": calculated_charges
         })
     return pd.DataFrame(consolidated)
+
 
 def create_download_link(file_path: str, label: str) -> str:
     """Generate HTML download link"""
