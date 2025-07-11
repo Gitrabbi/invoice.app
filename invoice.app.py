@@ -128,6 +128,7 @@ def generate_pdf_from_template(
     except Exception as e:
         st.error(f"Template processing failed: {str(e)}")
         return None
+
 def update_notification_sheet(output_folder: str, pdf_name: str, customer: str, 
                             invoice_number: int, contact: str, total: str):
     """Update tracking spreadsheet"""
@@ -154,19 +155,29 @@ def consolidate_data(df: pd.DataFrame) -> pd.DataFrame:
     """Process raw data into invoice-ready format with original calculation logic"""
     consolidated = []
     for customer, group in df.groupby("MARK"):
+        # Use session state defaults if they exist
+        per_charge = (
+            st.session_state.global_defaults['PER_CHARGES'] 
+            if st.session_state.global_defaults.get('applied', False)
+            else float(group["PER CHARGES"].iloc[0])
+        )
+        parking_charges = (
+            st.session_state.global_defaults['PARKING_CHARGES']
+            if st.session_state.global_defaults.get('applied', False)
+            else float(group["PARKING CHARGES"].iloc[0])
+        )
+        
         # Original calculation logic
         total_qty = group["QTY"].sum(skipna=True)
         total_cbm = group["CBM"].sum(skipna=True)
-        
-        parking_charges = group["PARKING CHARGES"].dropna().iloc[0] if not group["PARKING CHARGES"].dropna().empty else 0
         
         # Calculate charges based on original logic
         if total_cbm < 0.05:
             calculated_charges = 10.00
             rate_applied = 10.00  # Flat rate
         else:
-            rate_applied = group["PER CHARGES"].iloc[0]
-            calculated_charges = (group["CBM"] * group["PER CHARGES"]).sum(skipna=True)
+            rate_applied = per_charge
+            calculated_charges = (group["CBM"] * per_charge).sum(skipna=True)
         
         total_charges = calculated_charges + parking_charges
         first_row = group.iloc[0]
@@ -194,6 +205,7 @@ def consolidate_data(df: pd.DataFrame) -> pd.DataFrame:
             "CALCULATED_CHARGES": calculated_charges  # For verification
         })
     return pd.DataFrame(consolidated)
+
 def create_download_link(file_path: str, label: str) -> str:
     """Generate HTML download link"""
     with open(file_path, "rb") as f:
@@ -225,7 +237,8 @@ def main():
         st.session_state.global_defaults = {
             'PER_CHARGES': None,
             'WEIGHT_RATE': None,
-            'PARKING_CHARGES': None
+            'PARKING_CHARGES': None,
+            'applied': False
         }
     if 'consolidated_df' not in st.session_state:
         st.session_state.consolidated_df = None
@@ -239,7 +252,8 @@ def main():
         st.session_state.global_defaults = {
             'PER_CHARGES': None,
             'WEIGHT_RATE': None,
-            'PARKING_CHARGES': None
+            'PARKING_CHARGES': None,
+            'applied': False
         }
         if os.path.exists(OUTPUT_FOLDER):
             shutil.rmtree(OUTPUT_FOLDER)
@@ -262,12 +276,35 @@ def main():
         try:
             df = pd.read_excel(uploaded_file)
             
-            # Initialize missing columns with defaults
+            # Initialize missing columns with session state defaults if they exist
+            per_charge_default = (
+                st.session_state.global_defaults['PER_CHARGES'] 
+                if st.session_state.global_defaults.get('applied', False)
+                else 0.0
+            )
+            parking_default = (
+                st.session_state.global_defaults['PARKING_CHARGES']
+                if st.session_state.global_defaults.get('applied', False)
+                else 0.0
+            )
+            weight_rate_default = (
+                st.session_state.global_defaults['WEIGHT_RATE']
+                if st.session_state.global_defaults.get('applied', False)
+                else 1.0
+            )
+            
+            # Initialize missing columns
             for col in ["PARKING CHARGES", "PER CHARGES", "Weight Rate", 
                        "TRACKING NUMBER", "TERMS"]:
                 if col not in df.columns:
-                    default_value = 0.0 if col in ["PARKING CHARGES", "PER CHARGES"] else (1.0 if col == "Weight Rate" else "")
-                    df[col] = default_value
+                    if col == "PARKING CHARGES":
+                        df[col] = parking_default
+                    elif col == "PER CHARGES":
+                        df[col] = per_charge_default
+                    elif col == "Weight Rate":
+                        df[col] = weight_rate_default
+                    else:
+                        df[col] = ""
             
             # Handle zero weight rates
             if "Weight Rate" in df.columns:
@@ -308,11 +345,9 @@ def main():
                 st.session_state.global_defaults = {
                     'PER_CHARGES': default_per_charge,
                     'WEIGHT_RATE': default_weight_rate,
-                    'PARKING_CHARGES': default_parking
+                    'PARKING_CHARGES': default_parking,
+                    'applied': True
                 }
-                df["PER CHARGES"] = default_per_charge
-                df["Weight Rate"] = default_weight_rate
-                df["PARKING CHARGES"] = default_parking
                 st.success("Global settings applied to all customers!")
             
             # Process data with original calculation logic
