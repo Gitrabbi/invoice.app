@@ -242,7 +242,7 @@ def display_customer_markdowns(df: pd.DataFrame):
             with cols[0]:
                 new_per_charges = st.number_input(
                     "Per Charges ($/CBM)",
-                    value=(customer_data['PER CHARGES']),
+                    value=float(customer_data['PER CHARGES']),
                     min_value=0.0,
                     step=0.1,
                     key=f"per_charges_{idx}"
@@ -251,7 +251,7 @@ def display_customer_markdowns(df: pd.DataFrame):
             with cols[1]:
                 new_parking = st.number_input(
                     "Parking Charges ($)",
-                    value=(customer_data['PARKING CHARGES']),
+                    value=float(customer_data['PARKING CHARGES']),
                     min_value=0.0,
                     step=0.1,
                     key=f"parking_{idx}"
