@@ -213,11 +213,17 @@ def create_download_link(file_path: str, label: str) -> str:
     return f'<a href="data:application/octet-stream;base64,{b64}" download="{os.path.basename(file_path)}">{label}</a>'
 
 def display_customer_markdowns(df: pd.DataFrame):
-    """Display formatted markdown for each customer"""
-    st.header("📋 Customer Summaries")
-    for customer in df["MARK"].unique():
-        with st.expander(f"📌 {customer}"):
+    """Display formatted markdown for each customer with editing capability"""
+    st.header("📋 Customer Summaries & Editing")
+    
+    # Create a copy of the dataframe to work with
+    edited_df = df.copy()
+    
+    for idx, customer in enumerate(df["MARK"].unique()):
+        with st.expander(f"📌 {customer}", expanded=False):
             customer_data = df[df["MARK"] == customer].iloc[0]
+            
+            # Display customer info
             st.markdown(f"""
             **Customer:** {customer}  
             **Contact:** {customer_data.get('CONTACT NUMBER', 'N/A')}  
@@ -228,6 +234,78 @@ def display_customer_markdowns(df: pd.DataFrame):
             **Terms:** {customer_data.get('TERMS', 'N/A')}
             **Flat Rate Applied:** {customer_data.get('FLAT_RATE_APPLIED', 'No')}
             """)
+            
+            # Add editing capability
+            st.subheader("✏️ Edit Customer Data")
+            cols = st.columns(3)
+            
+            with cols[0]:
+                new_per_charges = st.number_input(
+                    "Per Charges ($/CBM)",
+                    value=float(customer_data['PER CHARGES']),
+                    min_value=0.0,
+                    step=0.1,
+                    key=f"per_charges_{idx}"
+                )
+            
+            with cols[1]:
+                new_parking = st.number_input(
+                    "Parking Charges ($)",
+                    value=float(customer_data['PARKING CHARGES']),
+                    min_value=0.0,
+                    step=0.1,
+                    key=f"parking_{idx}"
+                )
+            
+            with cols[2]:
+                new_terms = st.text_input(
+                    "Terms",
+                    value=customer_data.get('TERMS', ''),
+                    key=f"terms_{idx}"
+                )
+            
+            # Additional editable fields
+            cols2 = st.columns(2)
+            with cols2[0]:
+                new_tracking = st.text_input(
+                    "Tracking Number",
+                    value=customer_data.get('TRACKING NUMBER', ''),
+                    key=f"tracking_{idx}"
+                )
+            
+            with cols2[1]:
+                new_contact = st.text_input(
+                    "Contact Number",
+                    value=customer_data.get('CONTACT NUMBER', ''),
+                    key=f"contact_{idx}"
+                )
+            
+            if st.button(f"💾 Save Changes for {customer}", key=f"save_{idx}"):
+                # Update the dataframe with edited values
+                mask = edited_df["MARK"] == customer
+                edited_df.loc[mask, "PER CHARGES"] = new_per_charges
+                edited_df.loc[mask, "PARKING CHARGES"] = new_parking
+                edited_df.loc[mask, "TERMS"] = new_terms
+                edited_df.loc[mask, "TRACKING NUMBER"] = new_tracking
+                edited_df.loc[mask, "CONTACT NUMBER"] = new_contact
+                
+                # Recalculate totals
+                total_cbm = edited_df.loc[mask, "CBM"].sum()
+                if total_cbm < 0.05:
+                    calculated_charges = 10.00
+                else:
+                    calculated_charges = (edited_df.loc[mask, "CBM"] * edited_df.loc[mask, "PER CHARGES"]).sum()
+                
+                total_charges = calculated_charges + new_parking
+                edited_df.loc[mask, "TOTAL CHARGES_SUM"] = total_charges
+                edited_df.loc[mask, "TOTAL CHARGES"] = f"{total_charges:.2f}"
+                edited_df.loc[mask, "FLAT_RATE_APPLIED"] = "Yes" if total_cbm < 0.05 else "No"
+                
+                st.session_state.consolidated_df = edited_df
+                st.success(f"Changes saved for {customer}!")
+                st.rerun()
+    
+    return edited_df
 
 def main():
     st.title("📄 Invoice Generation System")
