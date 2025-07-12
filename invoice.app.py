@@ -382,6 +382,27 @@ def display_customer_markdowns(df: pd.DataFrame):
                 edited_df.loc[mask, "TRACKING NUMBER"] = new_tracking
                 edited_df.loc[mask, "CONTACT NUMBER"] = new_contact
 
+                # Recalculate NUM_TOTAL_CBM based on new weight rate
+try:
+    original_df = st.session_state.raw_df  # store your raw data when you load it
+    customer_rows = original_df[original_df["MARK"] == customer].copy()
+
+    # Convert types
+    customer_rows["WEIGHT(KG)"] = customer_rows["WEIGHT(KG)"].astype(float)
+    customer_rows["MEAS.(CBM)"] = customer_rows["MEAS.(CBM)"].astype(float)
+
+    weight_cbm = customer_rows["WEIGHT(KG)"] / float(new_weight_rate)
+    actual_cbm = pd.concat([customer_rows["MEAS.(CBM)"], weight_cbm], axis=1).max(axis=1)
+    current_cbm = actual_cbm.sum()
+
+    # Update edited_df with new CBM
+    edited_df.loc[mask, "NUM_TOTAL_CBM"] = current_cbm
+    edited_df.loc[mask, "TOTAL CBM"] = f"{current_cbm:.2f}"
+
+except Exception as e:
+    st.warning(f"CBM recalculation failed: {e}")
+    current_cbm = float(edited_df.loc[mask, "NUM_TOTAL_CBM"].values[0])
+
                 # Use NUM_TOTAL_CBM for safe calculation
                 current_cbm = float(edited_df.loc[mask, "NUM_TOTAL_CBM"].values[0])
                 if current_cbm < 0.05:
