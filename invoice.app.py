@@ -176,7 +176,7 @@ def consolidate_data(df: pd.DataFrame) -> pd.DataFrame:
         group["Weight CBM"] = group["WEIGHT(KG)"] / weight_rate
         group["Actual CBM"] = group[["MEAS.(CBM)", "Weight CBM"]].max(axis=1)
         total_cbm = group["Actual CBM"].sum()
-
+        total_qty = group["QTY"].astype(float).sum()  # ✅ Add this line
         # Calculate charges
         if total_cbm < 0.05:
             calculated_charges = 10.00  # Flat rate
