@@ -422,7 +422,6 @@ if st.button(f"💾 Save Changes for {customer}", key=f"save_{idx}"):
     st.session_state.consolidated_df = edited_df
     st.success(f"Changes saved for {customer}!")
     st.rerun()
-
 return edited_df
 
 
