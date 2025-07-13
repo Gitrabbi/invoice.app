@@ -484,6 +484,85 @@ def display_customer_markdowns(df: pd.DataFrame):
     return edited_df
 
 
+def display_customer_editor():
+    st.header("✏️ Edit Invoice Table Directly")
+
+    # Load the current consolidated data
+    df = st.session_state.consolidated_df.copy()
+
+    # Display editable table (disable some columns)
+    edited_df = st.data_editor(
+        df,
+        use_container_width=True,
+        num_rows="dynamic",
+        disabled=[
+            "MARK", "TOTAL CBM", "TOTAL QTY", "FLAT_RATE_APPLIED",
+            "TOTAL CHARGES", "TOTAL CHARGES_SUM", "RATE", "CALCULATED_CHARGES"
+        ]
+    )
+
+    if st.button("💾 Save Table Changes"):
+        # Pull raw data for accurate recalculation
+        raw_df = st.session_state.raw_df.copy()
+
+        # For each customer, update the original data with new editable values
+        updated_records = []
+        for _, row in edited_df.iterrows():
+            customer = row["MARK"]
+            per_charges = float(row["PER CHARGES"])
+            parking = float(row["PARKING CHARGES"])
+            weight_rate = float(row["Weight Rate"])
+
+            # Get customer's raw rows
+            customer_rows = raw_df[raw_df["MARK"] == customer].copy()
+            customer_rows["WEIGHT(KG)"] = customer_rows["WEIGHT(KG)"].astype(float)
+            customer_rows["MEAS.(CBM)"] = customer_rows["MEAS.(CBM)"].astype(float)
+            customer_rows["QTY"] = customer_rows["QTY"].astype(float)
+
+            # Recalculate CBM
+            weight_cbm = customer_rows["WEIGHT(KG)"] / weight_rate
+            actual_cbm = pd.concat([customer_rows["MEAS.(CBM)"], weight_cbm], axis=1).max(axis=1)
+            total_cbm = actual_cbm.sum()
+            total_qty = customer_rows["QTY"].sum()
+
+            # Charges
+            if total_cbm < 0.05:
+                calculated_charges = 10.00
+                rate_applied = 10.00
+            else:
+                calculated_charges = (actual_cbm * per_charges).sum()
+                rate_applied = per_charges
+
+            total_charges = calculated_charges + parking
+
+            # Multi-line fields
+            fields = ["RECEIPT NO.", "QTY", "DESCRIPTION", "CBM", "WEIGHT(KG)"]
+            joined = {f: "\n".join(customer_rows[f].astype(str)) for f in fields}
+
+            updated_records.append({
+                **joined,
+                "PARKING CHARGES": f"{parking:.2f}",
+                "PER CHARGES": f"{rate_applied:.2f}",
+                "RATE": f"{rate_applied:.2f}",
+                "Weight Rate": f"{weight_rate:.2f}",
+                "TOTAL CHARGES": f"{total_charges:.2f}",
+                "MARK": customer,
+                "CONTACT NUMBER": str(row.get("CONTACT NUMBER", "")),
+                "CARGO NUMBER": str(row.get("CARGO NUMBER", "")),
+                "TRACKING NUMBER": str(row.get("TRACKING NUMBER", "")),
+                "TERMS": str(row.get("TERMS", "")),
+                "TOTAL QTY": f"{total_qty:.2f}",
+                "TOTAL CBM": f"{total_cbm:.2f}",
+                "NUM_TOTAL_CBM": total_cbm,
+                "TOTAL CHARGES_SUM": total_charges,
+                "FLAT_RATE_APPLIED": "Yes" if total_cbm < 0.05 else "No",
+                "CALCULATED_CHARGES": calculated_charges
+            })
+
+        # Save back to session
+        st.session_state.consolidated_df = pd.DataFrame(updated_records)
+        st.success("✅ Table updated and recalculated successfully.")
+        st.rerun()
 
 def main():
     st.title("📄 Invoice Generation System")
