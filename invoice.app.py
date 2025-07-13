@@ -433,58 +433,56 @@ def display_customer_markdowns(df: pd.DataFrame):
             with cols2[1]:
                 new_contact = st.text_input("Contact Number", value=str(customer_data.get('CONTACT NUMBER', '')), key=f"contact_{idx}")
 
-if st.button(f"💾 Save Changes for {customer}", key=f"save_{idx}"):
-    mask = edited_df["MARK"] == customer
+            # Save button inside expander
+            if st.button(f"💾 Save Changes for {customer}", key=f"save_{idx}"):
+                mask = edited_df["MARK"] == customer
 
-    # Update edited fields
-    edited_df.loc[mask, "PER CHARGES"] = float(new_per_charges)
-    edited_df.loc[mask, "PARKING CHARGES"] = float(new_parking)
-    edited_df.loc[mask, "Weight Rate"] = float(new_weight_rate)
-    edited_df.loc[mask, "TERMS"] = new_terms
-    edited_df.loc[mask, "TRACKING NUMBER"] = new_tracking
-    edited_df.loc[mask, "CONTACT NUMBER"] = new_contact
+                # Update edited fields
+                edited_df.loc[mask, "PER CHARGES"] = float(new_per_charges)
+                edited_df.loc[mask, "PARKING CHARGES"] = float(new_parking)
+                edited_df.loc[mask, "Weight Rate"] = float(new_weight_rate)
+                edited_df.loc[mask, "TERMS"] = new_terms
+                edited_df.loc[mask, "TRACKING NUMBER"] = new_tracking
+                edited_df.loc[mask, "CONTACT NUMBER"] = new_contact
 
-    # Recalculate NUM_TOTAL_CBM based on new weight rate
-    try:
-        original_df = st.session_state.raw_df  # store your raw data when you load it
-        customer_rows = original_df[original_df["MARK"] == customer].copy()
+                # Recalculate NUM_TOTAL_CBM based on new weight rate
+                try:
+                    original_df = st.session_state.raw_df
+                    customer_rows = original_df[original_df["MARK"] == customer].copy()
 
-        # Convert types
-        customer_rows["WEIGHT(KG)"] = customer_rows["WEIGHT(KG)"].astype(float)
-        customer_rows["MEAS.(CBM)"] = customer_rows["MEAS.(CBM)"].astype(float)
+                    customer_rows["WEIGHT(KG)"] = customer_rows["WEIGHT(KG)"].astype(float)
+                    customer_rows["MEAS.(CBM)"] = customer_rows["MEAS.(CBM)"].astype(float)
 
-        weight_cbm = customer_rows["WEIGHT(KG)"] / float(new_weight_rate)
-        actual_cbm = pd.concat([customer_rows["MEAS.(CBM)"], weight_cbm], axis=1).max(axis=1)
-        current_cbm = actual_cbm.sum()
+                    weight_cbm = customer_rows["WEIGHT(KG)"] / float(new_weight_rate)
+                    actual_cbm = pd.concat([customer_rows["MEAS.(CBM)"], weight_cbm], axis=1).max(axis=1)
+                    current_cbm = actual_cbm.sum()
 
-        # Update edited_df with new CBM
-        edited_df.loc[mask, "NUM_TOTAL_CBM"] = current_cbm
-        edited_df.loc[mask, "TOTAL CBM"] = f"{current_cbm:.2f}"
+                    edited_df.loc[mask, "NUM_TOTAL_CBM"] = current_cbm
+                    edited_df.loc[mask, "TOTAL CBM"] = f"{current_cbm:.2f}"
 
-    except Exception as e:
-        st.warning(f"CBM recalculation failed: {e}")
-        current_cbm = float(edited_df.loc[mask, "NUM_TOTAL_CBM"].values[0])
+                except Exception as e:
+                    st.warning(f"CBM recalculation failed: {e}")
+                    current_cbm = float(edited_df.loc[mask, "NUM_TOTAL_CBM"].values[0])
 
-    # Use NUM_TOTAL_CBM for safe calculation
-    current_cbm = float(edited_df.loc[mask, "NUM_TOTAL_CBM"].values[0])
-    if current_cbm < 0.05:
-        calculated_charges = 10.00
-    else:
-        calculated_charges = current_cbm * float(new_per_charges)
+                current_cbm = float(edited_df.loc[mask, "NUM_TOTAL_CBM"].values[0])
+                if current_cbm < 0.05:
+                    calculated_charges = 10.00
+                else:
+                    calculated_charges = current_cbm * float(new_per_charges)
 
-    total_charges = calculated_charges + float(new_parking)
+                total_charges = calculated_charges + float(new_parking)
 
-    # Update calculated fields
-    edited_df.loc[mask, "TOTAL CHARGES_SUM"] = total_charges
-    edited_df.loc[mask, "TOTAL CHARGES"] = f"{total_charges:.2f}"
-    edited_df.loc[mask, "FLAT_RATE_APPLIED"] = "Yes" if current_cbm < 0.05 else "No"
-    edited_df.loc[mask, "RATE"] = f"{10.00:.2f}" if current_cbm < 0.05 else f"{new_per_charges:.2f}"
+                edited_df.loc[mask, "TOTAL CHARGES_SUM"] = total_charges
+                edited_df.loc[mask, "TOTAL CHARGES"] = f"{total_charges:.2f}"
+                edited_df.loc[mask, "FLAT_RATE_APPLIED"] = "Yes" if current_cbm < 0.05 else "No"
+                edited_df.loc[mask, "RATE"] = f"{10.00:.2f}" if current_cbm < 0.05 else f"{new_per_charges:.2f}"
 
-    # Save to session
-    st.session_state.consolidated_df = edited_df
-    st.success(f"Changes saved for {customer}!")
-    st.rerun()
+                st.session_state.consolidated_df = edited_df
+                st.success(f"Changes saved for {customer}!")
+                st.rerun()
+
     return edited_df
+
 
 
 def main():
