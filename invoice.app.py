@@ -692,12 +692,12 @@ def main():
         st.subheader("✏️ Customer Editing Mode")
         use_table_editor = st.checkbox("Use Table Editor Instead of Per-Customer Forms", value=True)
 
-     if use_table_editor:
-    display_customer_editor()
-     else:
-    display_customer_markdowns(st.session_state.consolidated_df)
-
+        if use_table_editor:
+            display_customer_editor()
+        else:
+            display_customer_markdowns(st.session_state.consolidated_df)
         
+        # Display processed table
         st.header("📊 Processed Data")
         st.dataframe(st.session_state.consolidated_df)
         
@@ -794,3 +794,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
