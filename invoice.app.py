@@ -688,8 +688,15 @@ def main():
         df["CBM"] = df[["MEAS.(CBM)", "Weight CBM"]].max(axis=1)
         st.session_state.consolidated_df = consolidate_data(df)
         
-        # Display customer markdowns
-        display_customer_markdowns(st.session_state.consolidated_df)
+        # Choose editing method
+        st.subheader("✏️ Customer Editing Mode")
+        use_table_editor = st.checkbox("Use Table Editor Instead of Per-Customer Forms", value=True)
+
+     if use_table_editor:
+    display_customer_editor()
+     else:
+    display_customer_markdowns(st.session_state.consolidated_df)
+
         
         st.header("📊 Processed Data")
         st.dataframe(st.session_state.consolidated_df)
