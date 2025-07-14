@@ -496,7 +496,7 @@ def display_customer_editor():
 
     # ✅ Packing list download
     if st.button("Create & Download Excel"):
-        xls_buffer = export_parking_list(st.session_state.consolidated_df)
+        xls_buffer = export_packing_list(st.session_state.consolidated_df)
         st.download_button(
             label="⬇️ Download Packing_List_Print.xlsx",
             data=xls_buffer,
