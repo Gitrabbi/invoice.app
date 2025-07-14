@@ -11,6 +11,7 @@ import base64
 import zipfile
 import subprocess
 from typing import Optional
+from export_excel import export_to_excel_with_totals
 
 # Configuration
 TEMPLATE_PATH = "invoice_template.docx"
@@ -489,7 +490,20 @@ def display_customer_editor():
 
     # Load the current consolidated data
     df = st.session_state.consolidated_df.copy()
+    
+    st.subheader("📥 Download Packing List Print")
+    
+#packing list download
+   if st.button("Create & Download Excel"):
+    xls_buffer = export_to_excel_with_totals(st.session_state.consolidated_df)
+    st.download_button(
+        label="⬇️ Download Packing_List_Print.xlsx",
+        data=xls_buffer,
+        file_name="Packing_List_Print.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
+    
     # Display editable table (disable some columns)
     edited_df = st.data_editor(
         df,
