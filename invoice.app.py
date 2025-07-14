@@ -535,9 +535,16 @@ def display_customer_editor():
 
             total_charges = calculated_charges + parking
 
-            # Multi-line fields
+            # Multi-line fields  (safe lookup; provide CBM from recalculation)
             fields = ["RECEIPT NO.", "QTY", "DESCRIPTION", "CBM", "WEIGHT(KG)"]
-            joined = {f: "\n".join(customer_rows[f].astype(str)) for f in fields}
+            joined = {}
+            for f in fields:
+                if f == "CBM":
+                    joined[f] = "\n".join(actual_cbm.round(3).astype(str))
+                elif f in customer_rows.columns:
+                    joined[f] = "\n".join(customer_rows[f].astype(str))
+                else:
+                    joined[f] = ""
 
             updated_records.append({
                 **joined,
@@ -563,6 +570,7 @@ def display_customer_editor():
         st.session_state.consolidated_df = pd.DataFrame(updated_records)
         st.success("✅ Table updated and recalculated successfully.")
         st.rerun()
+
 
 def main():
     st.title("📄 Invoice Generation System")
