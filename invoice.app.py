@@ -492,18 +492,17 @@ def display_customer_editor():
     df = st.session_state.consolidated_df.copy()
     
     st.subheader("📥 Download Packing List Print")
-    
-#packing list download
-   if st.button("Create & Download Excel"):
-    xls_buffer = export_to_excel_with_totals(st.session_state.consolidated_df)
-    st.download_button(
-        label="⬇️ Download Packing_List_Print.xlsx",
-        data=xls_buffer,
-        file_name="Packing_List_Print.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
 
-    
+    # ✅ Packing list download
+    if st.button("Create & Download Excel"):
+        xls_buffer = export_to_excel_with_totals(st.session_state.consolidated_df)
+        st.download_button(
+            label="⬇️ Download Packing_List_Print.xlsx",
+            data=xls_buffer,
+            file_name="Packing_List_Print.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
     # Display editable table (disable some columns)
     edited_df = st.data_editor(
         df,
@@ -549,7 +548,7 @@ def display_customer_editor():
 
             total_charges = calculated_charges + parking
 
-            # Multi-line fields  (safe lookup; provide CBM from recalculation)
+            # Multi-line fields
             fields = ["RECEIPT NO.", "QTY", "DESCRIPTION", "CBM", "WEIGHT(KG)"]
             joined = {}
             for f in fields:
