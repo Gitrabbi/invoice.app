@@ -1,89 +1,105 @@
-# export_excel.py
-
 import pandas as pd
-import openpyxl
-from openpyxl.styles import PatternFill, Font
-from openpyxl.utils import get_column_letter
-from io import BytesIO
+import io
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils.dataframe import dataframe_to_rows
 
-SEA_BLUE = PatternFill(start_color="B7D6F4", end_color="B7D6F4", fill_type="solid")
-
-EXPORT_COLUMNS = [
-    "RECEIPT NO.", "MARK", "DESCRIPTION", "QTY",
-    "MEAS.(CBM)", "WEIGHT(KG)", "WEIGHT RATE", "WEIGHT CBM",
-    "CBM", "PER CHARGES", "TOTAL CHARGES", "CONTACT NUMBER",
-    "业务员/ Supplier"
-]
-
-NUMERIC_TOTAL_COLS = ["QTY", "MEAS.(CBM)", "WEIGHT(KG)", "CBM", "TOTAL CHARGES"]
-
-def export_to_excel_with_totals(df: pd.DataFrame) -> BytesIO:
-    """
-    Create an Excel file from df with:
-    - Data written in a fixed column order
-    - A blue total row after each customer group (if >1 row)
-    - A grand total row at the bottom
-    Sheet is named 'Packing List Print'.
-    Returns a BytesIO stream ready for download.
-    """
-    wb = openpyxl.Workbook()
+def export_packing_list(df):
+    # Prepare output Excel file
+    output = io.BytesIO()
+    wb = Workbook()
     ws = wb.active
     ws.title = "Packing List Print"
 
-    # --- Write header ---
-    for col_idx, col_name in enumerate(EXPORT_COLUMNS, 1):
-        cell = ws.cell(row=1, column=col_idx, value=col_name)
-        cell.font = Font(bold=True)
+    # Styles
+    bold_center = Font(bold=True)
+    center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    sea_blue_fill = PatternFill(start_color="B7DEE8", end_color="B7DEE8", fill_type="solid")
 
-    current_row = 2
-    grand_totals = {c: 0 for c in NUMERIC_TOTAL_COLS}
+    # Header content (adjust as needed)
+    ws.merge_cells("A1:N1")
+    ws["A1"] = "AUGUST CARGO LOGISTICS"
+    ws["A1"].font = Font(size=14, bold=True)
+    ws["A1"].alignment = center_align
 
-    # fill missing columns
-    work_df = df.copy()
-    for col in EXPORT_COLUMNS:
-        if col not in work_df.columns:
-            work_df[col] = ""
+    ws.merge_cells("A2:N2")
+    ws["A2"] = "PACKING LIST"
+    ws["A2"].font = Font(size=12, bold=True)
+    ws["A2"].alignment = center_align
 
-    # group by customer
-    grouped = work_df.groupby("MARK", sort=False)
+    ws.append([])  # Row 3 empty
+    ws.append([])  # Row 4 empty
 
-    for customer, group in grouped:
+    # Table headers (starting at row 5)
+    headers = [
+        "RECEIPT NO.", "MARK", "DESCRIPTION", "QTY", "CTNS", "MEAS. (CBM)", "WEIGHT(KG)",
+        "WEIGHT RATE", "WEIGHT CBM", "CBM", "PER CHARGES", "TOTAL CHARGES",
+        "CONTACT NUMBER", "业务员/ Supplier"
+    ]
+    ws.append(headers)
+    for col in range(1, len(headers) + 1):
+        cell = ws.cell(row=5, column=col)
+        cell.font = bold_center
+        cell.alignment = center_align
+
+    # Group by customer (MARK)
+    grouped = df.groupby("MARK")
+
+    for mark, group in grouped:
+        group = group.copy()
+
+        # Add row(s) for each item
         for _, row in group.iterrows():
-            for col_idx, col_name in enumerate(EXPORT_COLUMNS, 1):
-                ws.cell(row=current_row, column=col_idx, value=row[col_name])
-            # accumulate grand totals
-            for col in NUMERIC_TOTAL_COLS:
-                try:
-                    grand_totals[col] += float(row[col])
-                except ValueError:
-                    pass
-            current_row += 1
+            ws.append([
+                row.get("RECEIPT NO.", ""),
+                row.get("MARK", ""),
+                row.get("DESCRIPTION", ""),
+                row.get("QTY", ""),
+                "",  # CTNS not available
+                row.get("CBM", ""),
+                row.get("WEIGHT(KG)", ""),
+                row.get("Weight Rate", ""),
+                "",  # WEIGHT CBM not directly available
+                row.get("CBM", ""),
+                row.get("PER CHARGES", ""),
+                row.get("TOTAL CHARGES", ""),
+                row.get("CONTACT NUMBER", ""),
+                ""  # Supplier field
+            ])
 
-        # Add customer total row if more than one item
+        # If more than one row, add subtotal in sea blue row
         if len(group) > 1:
-            ws.cell(row=current_row, column=2, value=f"{customer} TOTAL")
-            for col_name in NUMERIC_TOTAL_COLS:
-                col_idx = EXPORT_COLUMNS.index(col_name) + 1
-                ws.cell(row=current_row, column=col_idx, value=group[col_name].sum())
-            # Sea blue fill
-            for col_idx in range(1, len(EXPORT_COLUMNS) + 1):
-                ws.cell(row=current_row, column=col_idx).fill = SEA_BLUE
-            current_row += 1
+            total_qty = group["QTY"].astype(float).sum()
+            total_cbm = group["CBM"].astype(float).sum()
+            total_weight = group["WEIGHT(KG)"].astype(float).sum()
+            total_charges = group["TOTAL CHARGES"].astype(float).sum()
 
-    # --- Final grand total row ---
-    ws.cell(row=current_row, column=2, value="GRAND TOTAL")
-    for col_name in NUMERIC_TOTAL_COLS:
-        col_idx = EXPORT_COLUMNS.index(col_name) + 1
-        ws.cell(row=current_row, column=col_idx, value=grand_totals[col_name])
-        ws.cell(row=current_row, column=col_idx).font = Font(bold=True)
+            total_row = [
+                "", f"{mark} TOTAL", "", total_qty, "", "", total_weight, "", "", total_cbm, "", total_charges, "", ""
+            ]
+            ws.append(total_row)
 
-    # Auto-size columns
-    for col_idx in range(1, len(EXPORT_COLUMNS) + 1):
-        col_letter = get_column_letter(col_idx)
-        ws.column_dimensions[col_letter].bestFit = True
-        ws.column_dimensions[col_letter].auto_size = True
+            # Apply sea blue fill
+            last_row = ws.max_row
+            for col in range(1, len(headers) + 1):
+                cell = ws.cell(row=last_row, column=col)
+                cell.fill = sea_blue_fill
+                cell.font = bold_center
+                cell.alignment = center_align
 
-    buffer = BytesIO()
-    wb.save(buffer)
-    buffer.seek(0)
-    return buffer
+    # Adjust column widths
+    for col in ws.columns:
+        max_length = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            try:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            except:
+                pass
+        ws.column_dimensions[col_letter].width = max(10, min(max_length + 2, 25))
+
+    # Save to BytesIO
+    wb.save(output)
+    output.seek(0)
+    return output
