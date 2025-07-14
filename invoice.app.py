@@ -11,7 +11,7 @@ import base64
 import zipfile
 import subprocess
 from typing import Optional
-from export_excel import export_to_excel_with_totals
+from export_excel import export_parking list
 
 # Configuration
 TEMPLATE_PATH = "invoice_template.docx"
