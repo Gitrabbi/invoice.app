@@ -717,6 +717,12 @@ def main():
             value=1,
             key="invoice_start"
         )
+        # Exclusion option before generating all invoices
+        st.subheader("🙅‍♂️ Exclude Customers from Invoice Generation")
+        all_customers = st.session_state.consolidated_df["MARK"].unique().tolist()
+        excluded_customers = st.multiselect("Select customers to exclude from 'Generate All Invoices'", options=all_customers, key="exclude_customers")
+
+        
         
         if st.button("🔄 Generate All Invoices", key="generate_all"):
             if os.path.exists(OUTPUT_FOLDER):
@@ -726,7 +732,10 @@ def main():
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            for i, (_, row) in enumerate(st.session_state.consolidated_df.iterrows()):
+        
+            included_df = st.session_state.consolidated_df[~st.session_state.consolidated_df["MARK"].isin(excluded_customers)].reset_index(drop=True)
+            for i, (_, row) in enumerate(included_df.iterrows()):
+    
                 status_text.text(f"Processing {i+1}/{len(st.session_state.consolidated_df)}: {row['MARK']}")
                 progress_bar.progress((i + 1) / len(st.session_state.consolidated_df))
                 
