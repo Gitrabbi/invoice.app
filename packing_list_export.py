@@ -109,9 +109,7 @@ def export_custom_packing_list(df: pd.DataFrame) -> io.BytesIO:
                     "PER CHARGES": g["PER CHARGES"] if i == 0 else "",
                     "TOTAL CHARGES": g["TOTAL CHARGES"] if i == 0 else "",
                     "CONTACT NUMBER": g["CONTACT NUMBER"] if i == 0 else "",
-                    "业务员/ Supplier": g["Supplier
-"] if i == 0 else "",
-                })
+                    "业务员/ Supplier": g["业务员/ Supplier"] if i == 0 else "",})
 
         # Write item rows
         for item in item_rows:
